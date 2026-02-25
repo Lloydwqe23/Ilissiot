@@ -1,5 +1,6 @@
 import { createServer } from "http";
 import { Server } from "socket.io";
+import 'dotenv/config';
 
 // 1. Створюємо звичайний HTTP сервер
 const httpServer = createServer();
