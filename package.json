@@ -1,0 +1,30 @@
+{
+  "name": "ilissiot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "nodemon index.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Lloydwqe23/Ilissiot.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/Lloydwqe23/Ilissiot/issues"
+  },
+  "homepage": "https://github.com/Lloydwqe23/Ilissiot#readme",
+  "devDependencies": {
+    "@types/node": "^25.3.0",
+    "nodemon": "^3.1.14",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "socket.io": "^4.8.3"
+  }
+}

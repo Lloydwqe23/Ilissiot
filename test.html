@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Тест Ilissiot</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body>
+    <h1>Тест Ядра Ilissiot</h1>
+    <input id="messageInput" type="text" placeholder="Напиши щось...">
+    <button onclick="sendMessage()">Відправити</button>
+
+    <script>
+        // Підключаємося до твого сервера
+        const socket = io("http://localhost:3000");
+
+        function sendMessage() {
+            const input = document.getElementById('messageInput');
+            // Відправляємо повідомлення в ядро
+            socket.emit("chat-message", input.value);
+            input.value = '';
+        }
+
+        // Слухаємо, що ядро нам поверне
+        socket.on("chat-message", (msg) => {
+            console.log("Ядро переслало повідомлення назад:", msg);
+            alert("Ядро каже: " + msg);
+        });
+    </script>
+</body>
+</html>
