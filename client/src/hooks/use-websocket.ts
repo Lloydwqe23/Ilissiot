@@ -155,8 +155,8 @@ export function useChatWebSocket(userId: string | undefined) {
       ws.onclose = () => {
         console.log('[WS] Disconnected');
         wsRef.current = null;
-        // Auto-reconnect only if tab is visible & close wasn't intentional
-        if (isVisibleRef.current && !intentionalRef.current) {
+        // Always auto-reconnect unless cleanup is running
+        if (!intentionalRef.current) {
           reconnectRef.current = setTimeout(connect, 3000);
         }
       };
@@ -166,28 +166,31 @@ export function useChatWebSocket(userId: string | undefined) {
       };
     };
 
-    // ── Tab visibility: online only while tab is visible ────────────
+    // ── Tab visibility: update status but keep WS alive for calls ──
     const onVisibilityChange = () => {
       isVisibleRef.current = !document.hidden;
 
       if (document.hidden) {
-        // Tab hidden → close WS → server fires 'close' → marks offline
-        intentionalRef.current = true;
-        if (reconnectRef.current) {
-          clearTimeout(reconnectRef.current);
-          reconnectRef.current = null;
+        // Tab hidden → tell server we're "away" but keep connection open
+        // so incoming calls can still arrive
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({
+            type: WS_EVENTS.TYPING_STOP, // lightweight event; status updated server-side below
+            payload: {},
+          }));
         }
-        wsRef.current?.close();
       } else {
-        // Tab visible → reconnect → CONNECT → server marks online
-        connect();
+        // Tab visible → reconnect if WS was lost, otherwise just ensure online
+        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+          connect();
+        }
       }
     };
 
     document.addEventListener('visibilitychange', onVisibilityChange);
 
-    // Initial connect (only if tab is actually visible)
-    if (!document.hidden) connect();
+    // Always connect (even if tab is hidden) so we can receive calls
+    connect();
 
     return () => {
       document.removeEventListener('visibilitychange', onVisibilityChange);
