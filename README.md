@@ -1,58 +1,88 @@
-🚀 Ilissiot Messenger Core<br>
-Ilissiot is a real-time messaging system built with Node.js, Socket.io, and Prisma. This repository contains the backend core capable of processing real-time messages and storing them in a cloud PostgreSQL database.<br>
+# Ilissiot Messenger
 
-🛠 Features<br>
-Real-time communication via WebSockets.<br>
+A full-stack real-time messenger with audio/video calls, built with React, Express, and WebRTC.
 
-Persistent message storage with PostgreSQL (Neon.tech).<br>
+## Tech Stack
 
-Type-safe database operations using Prisma ORM (v7+).<br>
+- **Frontend:** React 18, TypeScript, Vite, TailwindCSS, Radix UI (shadcn/ui), Framer Motion
+- **Backend:** Express 5, TypeScript, WebSocket (ws)
+- **Database:** PostgreSQL (Neon.tech), Drizzle ORM
+- **Auth:** express-session, bcryptjs, connect-pg-simple
+- **Calls:** WebRTC peer-to-peer with STUN servers
 
-Environment variable protection for sensitive data.<br>
+## Features
 
-🏗 Setup Instructions<br>
-To get this project running on another machine, follow these steps:<br>
+- Real-time messaging via WebSockets
+- Direct and group chats
+- Audio and video calls (WebRTC)
+- Call history entries in chat timeline
+- File, image, video, and audio attachments
+- Typing indicators and online/offline status
+- User search and profile settings
+- Message selection and batch deletion
+- User blocking
 
-1. Prerequisites<br>
-Make sure you have Node.js (v18 or higher) installed.<br>
+## Setup
 
-2. Clone the repository<br>
-Bash<br>
-git clone https://github.com/your-username/Ilissiot.git<br>
-cd Ilissiot<br>
-3. Install Dependencies<br>
-Bash<br>
-npm install<br>
-4. Configure Environment Variables<br>
-Create a .env file in the root directory and add your database connection string:<br>
+### Prerequisites
 
-Code snippet<br>
-DATABASE_URL="postgresql://user:password@endpoint/dbname?sslmode=require"<br>
-Note: Never commit this file to GitHub!<br>
+- Node.js v18+
+- PostgreSQL database (e.g. Neon.tech)
 
-5. Database Synchronization<br>
-Generate the Prisma Client and push the schema to your database:<br>
+### Install
 
-Bash<br>
-npx prisma generate<br>
-npx prisma db push<br>
-6. Run the Server<br>
-Start the development server with automatic reloading:<br>
+```bash
+git clone https://github.com/Lloydwqe23/Ilissiot.git
+cd Ilissiot
+npm install
+```
 
-Bash<br>
-npm run dev<br>
-📂 Project Structure<br>
-index.ts - The main server file (Socket.io logic).<br>
+### Configure
 
-prisma/schema.prisma - Database models (User, Message).<br>
+Create a `.env` file in the root:
 
-prisma.config.ts - Prisma 7 configuration for secure DB connection.<br>
+```
+DATABASE_URL="postgresql://user:password@host/dbname?sslmode=require"
+```
 
-test.html - A simple client-side file for testing the connection.<br>
+### Database
 
-🛠 Commands Reference<br>
-npm run dev - Starts the backend.<br>
+Push the schema to your database:
 
-npx prisma studio - Opens a visual editor for your database.<br>
+```bash
+npx drizzle-kit push
+```
 
-npx prisma db push - Syncs your local schema with the cloud DB.<br>
+### Run
+
+```bash
+npm run dev
+```
+
+The app starts at `http://localhost:5000`.
+
+## Project Structure
+
+```
+server/           Express backend, WebSocket, auth, file uploads
+  routes.ts       API routes and WebSocket signaling
+  storage.ts      Database queries (Drizzle)
+  auth/local.ts   Session-based authentication
+client/src/       React frontend
+  components/     Chat UI, call overlay, profile settings
+  hooks/          Auth, chats, messages, WebSocket, call state
+  pages/          Auth page, chat layout
+shared/           Shared schema and API contract
+  schema.ts       Drizzle table definitions, WS event types
+  routes.ts       Zod-validated API route definitions
+```
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Start development server |
+| `npm run build` | Production build |
+| `npm run start` | Run production build |
+| `npm run check` | TypeScript type check |
+| `npm run db:push` | Sync schema to database |
