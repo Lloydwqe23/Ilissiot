@@ -177,10 +177,20 @@ export function CallProvider({ children }: { children: ReactNode }) {
     if (!wsSendRef.current || state !== 'idle') return;
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: callType === 'video',
-      });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: callType === 'video',
+        });
+      } catch (mediaErr: any) {
+        if (callType === 'video' && (mediaErr.name === 'NotReadableError' || mediaErr.name === 'NotFoundError')) {
+          console.warn('[Call] Camera unavailable, falling back to audio-only:', mediaErr.message);
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        } else {
+          throw mediaErr;
+        }
+      }
       localStreamRef.current = stream;
 
       const { pc, remote } = createPC(p.userId);
@@ -235,25 +245,48 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   // ── Accept the incoming call ─────────────────────────────────────
   const acceptCall = useCallback(async () => {
-    if (!wsSendRef.current || !participant) return;
+    if (!wsSendRef.current || !participant) {
+      console.warn('[Call] acceptCall: no wsSend or participant', { ws: !!wsSendRef.current, participant });
+      return;
+    }
     const offerSdp = pendingOfferRef.current;
+    if (!offerSdp) {
+      console.error('[Call] acceptCall: no pending offer SDP — cannot accept');
+      cleanupMedia();
+      resetState();
+      return;
+    }
     pendingOfferRef.current = null;
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: type === 'video',
-      });
+      console.log('[Call] Requesting media…');
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: type === 'video',
+        });
+      } catch (mediaErr: any) {
+        // If video device is busy, fall back to audio-only
+        if (type === 'video' && (mediaErr.name === 'NotReadableError' || mediaErr.name === 'NotFoundError')) {
+          console.warn('[Call] Camera unavailable, falling back to audio-only:', mediaErr.message);
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        } else {
+          throw mediaErr;
+        }
+      }
       localStreamRef.current = stream;
 
       const { pc, remote } = createPC(participant.userId);
 
       stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
+      console.log('[Call] Setting remote description…');
       await pc.setRemoteDescription(new RTCSessionDescription(offerSdp));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
+      console.log('[Call] Sending answer…');
       wsSendRef.current({
         type: 'call:answer',
         payload: { targetUserId: participant.userId, sdp: answer },
@@ -272,7 +305,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       console.error('[Call] Failed to accept:', err);
       rejectCall();
     }
-  }, [participant, type, createPC]);
+  }, [participant, type, createPC, cleanupMedia, resetState]);
 
   // ── Reject the incoming call ─────────────────────────────────────
   const rejectCall = useCallback(() => {

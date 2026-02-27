@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { format, isToday, isYesterday } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, AlertCircle, CheckCircle2, Phone, Video } from "lucide-react";
+import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, AlertCircle, CheckCircle2, Smile, Phone, Video } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useChat, useBlockStatus, useBlockUser, useUnblockUser } from "@/hooks/use-chats";
 import { useMessages, useSendMessage, useMarkMessagesRead, useDeleteMessages } from "@/hooks/use-messages";
@@ -23,10 +23,236 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const markRead = useMarkMessagesRead();
   const deleteMessages = useDeleteMessages(chatId);
   const call = useCall();
-  
+
   const [inputValue, setInputValue] = useState("");
   const [attachments, setAttachments] = useState<Array<{name: string; url: string; type: string}>>([]);
   const [uploading, setUploading] = useState(false);
+  const [showStickerPicker, setShowStickerPicker] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState(0);
+
+  // emoji categories explicitly grouped
+  const EMOJI_CATEGORIES: { title: string; items: string[] }[] = [
+    {
+      title: 'Faces & Emotions',
+      items: [
+        '😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','😉','😊','😇','🥰','😍','🤩','😘','😗','😚','😙',
+        '😋','😛','😜','🤪','😝','🤑','🤗','🤭','🤫','🤔','🤐','🤨','😐','😑','😶','😏','😒','🙄','😬','🤥',
+        '😌','😔','😪','🤤','😴','😷','🤒','🤕','🤢','🤮','🤧','🥵','🥶','🥴','😵','🤯','🤠','🥳','😎','🤓',
+        '🧐','😕','😟','🙁','☹️','😮','😯','😲','😳','🥺','😦','😧','😨','😰','😥','😢','😭','😱','😖','😣',
+        '😞','😓','😩','😫','🥱','😤','😡','😠','🤬','😈','👿','💀','☠️','💩','🤡','👹','👺','👻','👽','👾',
+        '🤖','🎃','😺','😸','😹','😻','😼','😽','🙀','😿','😾',
+      ],
+    },
+    {
+      title: 'Animals – Land',
+      items: [
+        '🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🦁','🐮','🐷','🐽','🐸','🐵','🙈','🙉','🙊','🐒','🐔','🐧',
+        '🐦','🐤','🐣','🐥','🦆','🦅','🦉','🦇','🐺','🐗','🐴','🦄','🐝','🐛','🦋','🐌','🐞','🐜','🦟','🦗',
+        '🕷️','🦂','🐢','🐍','🦎','🐲','🦕','🦖','🦏','🦛','🦘','🦙','🦒','🦓','🐘','🦣','🐪','🐫','🦬',
+        '🐃','🐂','🐄','🐎','🐖','🐏','🐑','🐐','🦌','🐕','🐩','🦮','🐕‍🦺','🐈','🐈‍⬛','🐓','🦃','🦤','🦚',
+        '🦜','🦢','🕊️','🐇','🦝','🦨','🦡','🦫','🦦','🦥','🐁','🐀','🐿️','🦔',
+      ],
+    },
+    {
+      title: 'Animals – Sea',
+      items: [
+        '🐬','🐳','🐋','🦈','🐊','🐅','🐆','🦓','🦍','🦧','🐘','🦛','🦏','🐪','🐫','🦒','🦘','🦬','🐃',
+        '🐟','🐠','🐡','🦐','🦑','🐙','🦞','🦀','🦪','🐚','🐌',
+      ],
+    },
+    {
+      title: 'Nature',
+      items: [
+        '🌸','🌺','🌻','🌹','🌷','🌼','💐','🌾','🍀','🌿','🌱','🌲','🌳','🌴','🌵','🎋','🎍','🍁','🍂','🍃',
+        '🍄','🌰','🎄','🌊','🌬️','🌀','🌈','⛅','🌤️','🌥️','☁️','🌦️','🌧️','⛈️','🌩️','🌨️','❄️','🌪️','🌫️','🌙',
+        '🌛','🌜','🌝','🌞','⭐','🌟','💫','✨','⚡','🔥','💥','🌍','🌎','🌏','🪐','🌑','🌒','🌓','🌔','🌕',
+      ],
+    },
+    {
+      title: 'Food & Drink',
+      items: [
+        '🍎','🍊','🍋','🍇','🍓','🫐','🍈','🍒','🍑','🥭','🍍','🥥','🥝','🍅','🫒','🥑','🍆','🥦','🥬','🥒',
+        '🌶️','🫑','🧄','🧅','🥕','🌽','🍠','🧆','🥜','🌰','🍞','🥐','🥖','🫓','🥨','🧀','🥚','🍳','🧈','🥞',
+        '🧇','🥓','🥩','🍗','🍖','🌭','🍔','🍟','🍕','🫔','🌮','🌯','🥙','🧆','🥚','🍝','🍜','🍛','🍲','🫕',
+        '🍣','🍱','🥟','🦪','🍤','🍙','🍚','🍘','🍥','🥮','🍢','🧁','🍰','🎂','🍮','🍭','🍬','🍫','🍿','🍩',
+        '🍪','🌰','🥜','🍯','🧃','🥤','🧋','☕','🍵','🫖','🍺','🍻','🥂','🍷','🫗','🥃','🍸','🍹','🧉','🍾',
+      ],
+    },
+    {
+      title: 'Activities & Sports',
+      items: [
+        '⚽','🏀','🏈','⚾','🥎','🎾','🏐','🏉','🥏','🎱','🪀','🏓','🏸','🏒','🥍','🏑','🏏','🪃','🥅','⛳',
+        '🪁','🏹','🎣','🤿','🥊','🥋','🎽','🛹','🛼','🛷','⛸️','🥌','🎿','⛷️','🏂','🪂','🏋️','🤼','🤸','⛹️',
+        '🤺','🏇','🧘','🏄','🚣','🧗','🚴','🏆','🥇','🥈','🥉','🏅','🎖️','🎗️','🎫','🎟️','🎪','🤹','🎭','🎨',
+        '🎬','🎤','🎧','🎼','🎹','🥁','🪘','🎷','🎺','🎸','🪕','🎻','🎲','♟️','🎯','🎳','🎮','🕹️','🎰',
+      ],
+    },
+    {
+      title: 'Travel & Places',
+      items: [
+        '🚗','🚕','🚙','🚌','🚎','🏎️','🚓','🚑','🚒','🚐','🛻','🚚','🚛','🚜','🏍️','🛵','🛺','🚲','🛴','🛹',
+        '🚁','🛸','✈️','🛩️','🚀','🛶','⛵','🚤','🛥️','🛳️','🚂','🚃','🚄','🚅','🚆','🚇','🚈','🚉','🚊','🚝',
+        '🏔️','⛰️','🌋','🗻','🏕️','🏖️','🏜️','🏝️','🏞️','🏟️','🏛️','🏗️','🧱','🪨','🪵','🛖','🏘️','🏚️','🏠','🏡',
+        '🏢','🏣','🏤','🏥','🏦','🏨','🏩','🏪','🏫','🏬','🏭','🏯','🏰','💒','🗼','🗽','🗺️','🗾','🧭',
+      ],
+    },
+    {
+      title: 'Objects',
+      items: [
+        '⌚','📱','💻','🖥️','⌨️','🖱️','🖨️','📠','📺','📷','📸','📹','🎥','📽️','🎞️','📞','☎️','📟','📡',
+        '🔋','🪫','🔌','💡','🔦','🕯️','🪔','🧯','🛢️','💰','💴','💵','💶','💷','💸','💳','🪙','💹','📈','📉',
+        '📊','📋','📌','📍','✂️','🗃️','🗄️','🗑️','🔒','🔓','🔏','🔐','🔑','🗝️','🔨','🪓','⛏️','⚒️','🛠️','🗡️',
+        '⚔️','🔫','🪃','🛡️','🪚','🔧','🪛','🔩','⚙️','🗜️','⚖️','🦯','🔗','⛓️','🪝','🧲','🪜','⚗️','🔭','🔬',
+        '🩺','💊','💉','🩹','🩼','🩻','🪤','🧸','🪆','🖼️','🧵','🪡','🧶','🪢','👓','🕶️','🥽','🧣','🧤','🧥',
+        '👒','🎩','🎓','⛑️','📿','💄','👟','👠','👡','👢','👑','👜','👛','👝','🛍️','🎒','🧳','🌂','☂️',
+      ],
+    },
+    {
+      title: 'Symbols & Misc',
+      items: [
+        '❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','💟','☮️',
+        '✝️','☪️','🕉️','☸️','✡️','🔯','🕎','☯️','☦️','🛐','⛎','♈','♉','♊','♋','♌','♍','♎','♏','♐',
+      ],
+    },
+    {
+      title: 'Hands & People',
+      items: [
+        '👋','🤚','🖐️','✋','🖖','👌','🤌','🤏','✌️','🤞','🤟','🤘','🤙','👈','👉','👆','🖕','👇','☝️','👍',
+        '👎','✊','👊','🤛','🤜','👏','🙌','👐','🤲','🤝','🙏','✍️','💅','🤳','💪','🦾','🦵','🦶','👂','🦻',
+        '👃','🫀','🫁','🧠','🦷','🦴','👀','👁️','👅','👄','🫦','💋',
+      ],
+    },
+    {
+      title: 'Flags & More',
+      items: [
+        '🏁','🚩','🎌','🏴','🏳️','🎏','🎀','🎁','🎊','🎉','🎈','🎍','🎋','🎎','🎑','🎃','🎄','🎆','🎇','🧨',
+        '✨','🎐','🧧','🎠','🎡','🎢','🎪','🤹','🎭','🎨','🖼️','🎰','🎲','🧩','🎯','🎳','🎮','🕹️',
+      ],
+    },
+    {
+      title: 'Plants & Earth',
+      items: [
+        '🌱','🌿','☘️','🍀','🎍','🎋','🍃','🍂','🍁','🌾','🌺','🌻','🌹','🌷','🌸','💐','🍄','🌰','🎄',
+      ],
+    },
+  ];
+
+  const ALL_EMOJIS = new Set(EMOJI_CATEGORIES.flatMap(c => c.items));
+  const onlyEmoji = (text?: string) => {
+    if (!text) return false;
+    const chars = Array.from(text.trim());
+    return chars.length > 0 && chars.every(ch => ALL_EMOJIS.has(ch));
+  };
+
+  // helper for rendering attachments of a message
+  const renderAttachments = (msg: any) => {
+    const files: any[] = msg.attachments || [];
+    if (files.length === 0) return null;
+
+    const onlyStickers = files.every(f => f.type === 'sticker');
+    if (onlyStickers) {
+      return (
+        <div className="mt-3 flex items-center justify-center space-x-2">
+          {files.map((f, idx) => (
+            <span key={idx} className="text-4xl">{f.name}</span>
+          ))}
+        </div>
+      );
+    }
+
+    return (
+      <div className="mt-3 pt-3 border-t border-current border-opacity-20 space-y-2">
+        {files.map((file: any, idx: number) => {
+          if (file.type === 'sticker') {
+            return <span key={idx} className="text-4xl">{file.name}</span>;
+          }
+
+          // ── Call history entry ──
+          const isCallEntry = file.type?.startsWith('call/');
+          if (isCallEntry) {
+            try {
+              const meta = JSON.parse(file.url || '{}');
+              const callType = meta.callType || 'audio';
+              const reason = meta.endReason || 'hangup';
+              const dur = meta.duration;
+              const durationStr = dur
+                ? `${Math.floor(dur / 60000).toString().padStart(2, '0')}:${Math.floor((dur % 60000) / 1000).toString().padStart(2, '0')}`
+                : null;
+              const icon = callType === 'video' ? '🎥' : '📞';
+              const labels: Record<string, string> = {
+                hangup: durationStr ? `Call · ${durationStr}` : 'Call ended',
+                rejected: 'Call declined',
+                busy: 'User busy',
+                missed: 'Missed call',
+                error: 'Call failed',
+              };
+              return (
+                <div key={idx} className="flex items-center gap-2 text-xs opacity-80">
+                  <span>{icon}</span>
+                  <span>{labels[reason] || 'Call ended'}</span>
+                </div>
+              );
+            } catch {
+              return <div key={idx} className="text-xs opacity-60">📞 Call</div>;
+            }
+          }
+
+          const isImage = file.type.startsWith('image/');
+          const isVideo = file.type.startsWith('video/');
+          const isAudio = file.type.startsWith('audio/');
+
+          if (isImage) {
+            return (
+              <a
+                key={idx}
+                href={file.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block rounded-lg overflow-hidden hover:opacity-90 transition-opacity"
+              >
+                <img src={file.url} alt={file.name} className="max-w-xs max-h-96 rounded-lg" />
+              </a>
+            );
+          } else if (isVideo) {
+            return <video key={idx} src={file.url} controls className="max-w-xs rounded-lg" />;
+          } else if (isAudio) {
+            return (
+              <div
+                key={idx}
+                className="flex items-center gap-2 p-3 rounded-lg bg-black/10 dark:bg-white/10 hover:bg-black/20 dark:hover:bg-white/20 transition-colors max-w-xs"
+              >
+                <audio src={file.url} controls className="flex-1 h-8" />
+                <a
+                  href={file.url}
+                  download={file.name}
+                  className="p-1 rounded hover:bg-black/20 dark:hover:bg-white/20"
+                  title="Download audio"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                </a>
+              </div>
+            );
+          } else {
+            return (
+              <a
+                key={idx}
+                href={file.url}
+                download={file.name}
+                className="flex items-center gap-2 p-2 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium truncate">{file.name}</p>
+                </div>
+              </a>
+            );
+          }
+        })}
+      </div>
+    );
+  };
+
   const [selectedMessages, setSelectedMessages] = useState<Set<number>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -37,7 +263,6 @@ export function ChatWindow({ chatId }: { chatId: number }) {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-    // Mark as read when viewing
     if (chatId) {
       markRead.mutate(chatId);
     }
@@ -46,9 +271,9 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const handleSend = (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!inputValue.trim() && attachments.length === 0) return;
-    
-    sendMessage.mutate({ 
-      chatId, 
+
+    sendMessage.mutate({
+      chatId,
       content: inputValue.trim(),
       attachments: attachments.length > 0 ? attachments : undefined
     }, {
@@ -75,26 +300,17 @@ export function ChatWindow({ chatId }: { chatId: number }) {
           body: formData,
         });
 
-        if (!response.ok) {
-          throw new Error("Upload failed");
-        }
+        if (!response.ok) throw new Error("Upload failed");
 
         const data = await response.json();
-        
-        setAttachments((prev) => [...prev, {
-          name: data.name,
-          url: data.url,
-          type: data.type,
-        }]);
+        setAttachments((prev) => [...prev, { name: data.name, url: data.url, type: data.type }]);
       }
     } catch (err) {
       console.error("Upload error:", err);
       alert("Failed to upload file");
     } finally {
       setUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
@@ -114,30 +330,21 @@ export function ChatWindow({ chatId }: { chatId: number }) {
     return otherMember?.user?.profileImageUrl;
   };
 
-  // Real-time online/offline status for the other user in a direct chat
   const otherMember = chat?.members?.find((m: any) => m.userId !== user?.id);
   const statusInfo = useUserStatus(otherMember?.userId);
-  const statusText = formatLastSeen(
-    statusInfo,
-    otherMember?.user?.status,
-    otherMember?.user?.lastSeen,
-  );
+  const statusText = formatLastSeen(statusInfo, otherMember?.user?.status, otherMember?.user?.lastSeen);
 
   const handleClearHistoryForMe = async () => {
     if (!confirm("Clear all chat history from your view only?")) return;
     try {
-      const response = await fetch(`/api/chats/${chatId}/clear-for-me`, {
-        method: 'POST',
-        credentials: 'include',
-      });
+      const response = await fetch(`/api/chats/${chatId}/clear-for-me`, { method: 'POST', credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
         const msg = data.cleared != null ? ` (${data.cleared} messages)` : '';
         alert("Chat history cleared for you" + msg);
         window.location.reload();
       } else {
-        const text = await response.text();
-        alert("Failed to clear history: " + response.status + " " + text);
+        alert("Failed to clear history: " + response.status + " " + await response.text());
       }
     } catch (err) {
       console.error("Error clearing history:", err);
@@ -148,16 +355,12 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const handleClearHistoryForAll = async () => {
     if (!confirm("This will remove every message from your view and delete your own messages for the other person. Proceed?")) return;
     try {
-      const response = await fetch(`/api/chats/${chatId}/clear-for-all`, {
-        method: 'POST',
-        credentials: 'include',
-      });
+      const response = await fetch(`/api/chats/${chatId}/clear-for-all`, { method: 'POST', credentials: 'include' });
       if (response.ok) {
         alert("Conversation cleared for you and your messages removed for the other user");
         window.location.reload();
       } else {
-        const text = await response.text();
-        alert("Failed to clear history: " + response.status + " " + text);
+        alert("Failed to clear history: " + response.status + " " + await response.text());
       }
     } catch (err) {
       console.error("Error clearing history:", err);
@@ -168,12 +371,8 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const handleDeleteChat = async () => {
     if (!confirm("Delete this chat? This action cannot be undone.")) return;
     try {
-      const response = await fetch(`/api/chats/${chatId}`, {
-        method: 'DELETE',
-      });
-      if (response.ok) {
-        navigate('/');
-      }
+      const response = await fetch(`/api/chats/${chatId}`, { method: 'DELETE' });
+      if (response.ok) navigate('/');
     } catch (err) {
       console.error("Error deleting chat:", err);
       alert("Failed to delete chat");
@@ -188,10 +387,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
     if (!otherMember) return;
     if (confirm('Are you sure you want to block this user?')) {
       blockMut.mutate(otherMember.userId, {
-        onSuccess: () => {
-          alert('User blocked');
-          navigate('/');
-        }
+        onSuccess: () => { alert('User blocked'); navigate('/'); }
       });
     }
   };
@@ -199,24 +395,15 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const handleUnblockUser = async () => {
     if (!otherMember) return;
     unblockMut.mutate(otherMember.userId, {
-      onSuccess: () => {
-        alert('User unblocked');
-      }
+      onSuccess: () => { alert('User unblocked'); }
     });
   };
 
   const toggleMessageSelection = (messageId: number) => {
     setSelectedMessages(prev => {
       const next = new Set(prev);
-      if (next.has(messageId)) {
-        next.delete(messageId);
-      } else {
-        next.add(messageId);
-      }
-      // Exit selection mode if nothing selected
-      if (next.size === 0) {
-        setSelectionMode(false);
-      }
+      if (next.has(messageId)) { next.delete(messageId); } else { next.add(messageId); }
+      if (next.size === 0) setSelectionMode(false);
       return next;
     });
   };
@@ -224,42 +411,29 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const handleDeleteSelected = () => {
     if (selectedMessages.size === 0) return;
 
-    // build list of items with forAll flag
     const items: Array<{ id: number; forAll: boolean }> = [];
     let ownCount = 0;
     selectedMessages.forEach(id => {
       const msg = messages?.find(m => m.id === id);
       const isMine = msg?.senderId === user?.id;
-      // default forAll true for your own messages; will adjust below if needed
       items.push({ id, forAll: !!isMine });
       if (isMine) ownCount += 1;
     });
     const otherCount = items.length - ownCount;
 
-    // determine what prompt to show and possibly adjust flags
     if (otherCount === 0) {
-      // only our own messages – ask user if they want to remove for everyone or just self
       const deleteForEveryone = confirm(
-        `You are deleting ${items.length} message(s).
-OK will remove them for everyone, Cancel will keep them visible to others and only delete for you.`
+        `You are deleting ${items.length} message(s).\nOK will remove them for everyone, Cancel will keep them visible to others and only delete for you.`
       );
       items.forEach(i => (i.forAll = deleteForEveryone));
-      if (!deleteForEveryone && items.length === 0) return; // just guard
     } else if (ownCount === 0) {
-      // only others' messages – just remove for self
       if (!confirm(`Delete ${items.length} message(s) for yourself? You cannot remove other users' messages.`)) return;
-      // all flags are already false
     } else {
-      // mix of your own and others
       if (!confirm(`Delete ${ownCount} of your messages for everyone and ${otherCount} messages just for yourself?`)) return;
-      // flags already set correctly
     }
 
     deleteMessages.mutate(items, {
-      onSuccess: () => {
-        setSelectedMessages(new Set());
-        setSelectionMode(false);
-      }
+      onSuccess: () => { setSelectedMessages(new Set()); setSelectionMode(false); }
     });
   };
 
@@ -289,8 +463,7 @@ OK will remove them for everyone, Cancel will keep them visible to others and on
 
   return (
     <div className="flex-1 flex flex-col h-screen relative bg-[#f8f9fa] dark:bg-[#0e1621] overflow-hidden">
-      {/* Telegram-style subtle pattern background could go here */}
-      
+
       {/* Header */}
       <header className="h-16 glass-panel flex items-center justify-between px-4 z-10 shrink-0 shadow-sm">
         {selectionMode ? (
@@ -316,102 +489,93 @@ OK will remove them for everyone, Cancel will keep them visible to others and on
           <>
             <div className="flex items-center gap-3">
               {isMobile && <SidebarTrigger className="mr-1 -ml-2" />}
-          
-          <Avatar className="w-10 h-10 border border-border/50">
-            <AvatarImage src={avatarUrl || ""} />
-            <AvatarFallback className="bg-primary/10 text-primary font-medium">{displayName?.[0] || 'U'}</AvatarFallback>
-          </Avatar>
-          
-          <div className="flex flex-col">
-            <h2 className="font-semibold text-[15px] leading-tight text-foreground">{displayName}</h2>
-            <span className={`text-[12px] ${!chat.isGroup && statusText === 'online' ? 'text-green-500 font-medium' : 'text-muted-foreground'}`}>
-              {chat.isGroup ? `${chat.members.length} members` : statusText}
-            </span>
-          </div>
-        </div>
-        
-        <div className="flex items-center gap-1">
-          {/* Call buttons (direct chats only) */}
-          {!chat?.isGroup && otherMember && (
-            <>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-muted-foreground rounded-full h-9 w-9 hover:text-primary"
-                onClick={() => call.startCall(
-                  {
-                    userId: otherMember.userId,
-                    name: [otherMember.user.firstName, otherMember.user.lastName].filter(Boolean).join(' ') || otherMember.user.email || 'Unknown',
-                    avatarUrl: otherMember.user.profileImageUrl,
-                  },
-                  chatId,
-                  'audio',
-                  [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.email || 'Unknown',
-                  user?.profileImageUrl
-                )}
-                title="Voice call"
-              >
-                <Phone className="w-5 h-5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-muted-foreground rounded-full h-9 w-9 hover:text-primary"
-                onClick={() => call.startCall(
-                  {
-                    userId: otherMember.userId,
-                    name: [otherMember.user.firstName, otherMember.user.lastName].filter(Boolean).join(' ') || otherMember.user.email || 'Unknown',
-                    avatarUrl: otherMember.user.profileImageUrl,
-                  },
-                  chatId,
-                  'video',
-                  [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.email || 'Unknown',
-                  user?.profileImageUrl
-                )}
-                title="Video call"
-              >
-                <Video className="w-5 h-5" />
-              </Button>
-            </>
-          )}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="text-muted-foreground rounded-full h-9 w-9">
-                <MoreVertical className="w-5 h-5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>Chat Options</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => handleClearHistoryForMe()}>
-                Clear history for me
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleClearHistoryForAll()}>
-                Clear history for everyone
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
+
+              <Avatar className="w-10 h-10 border border-border/50">
+                <AvatarImage src={avatarUrl || ""} />
+                <AvatarFallback className="bg-primary/10 text-primary font-medium">{displayName?.[0] || 'U'}</AvatarFallback>
+              </Avatar>
+
+              <div className="flex flex-col">
+                <h2 className="font-semibold text-[15px] leading-tight text-foreground">{displayName}</h2>
+                <span className={`text-[12px] ${!chat.isGroup && statusText === 'online' ? 'text-green-500 font-medium' : 'text-muted-foreground'}`}>
+                  {chat.isGroup ? `${chat.members.length} members` : statusText}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1">
+              {/* Call buttons (direct chats only) */}
               {!chat?.isGroup && otherMember && (
-                <DropdownMenuItem
-                  onClick={() => {
-                    if (blockStatus?.blocked) {
-                      handleUnblockUser();
-                    } else {
-                      handleBlockUser();
-                    }
-                  }}
-                  className={blockStatus?.blocked ? undefined : 'text-destructive'}
-                >
-                  {blockStatus?.blocked ? 'Unblock user' : 'Block user'}
-                </DropdownMenuItem>
+                <>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-muted-foreground rounded-full h-9 w-9 hover:text-primary"
+                    onClick={() => call.startCall(
+                      {
+                        userId: otherMember.userId,
+                        name: [otherMember.user.firstName, otherMember.user.lastName].filter(Boolean).join(' ') || otherMember.user.email || 'Unknown',
+                        avatarUrl: otherMember.user.profileImageUrl,
+                      },
+                      chatId,
+                      'audio',
+                      [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.email || 'Unknown',
+                      user?.profileImageUrl
+                    )}
+                    title="Voice call"
+                  >
+                    <Phone className="w-5 h-5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-muted-foreground rounded-full h-9 w-9 hover:text-primary"
+                    onClick={() => call.startCall(
+                      {
+                        userId: otherMember.userId,
+                        name: [otherMember.user.firstName, otherMember.user.lastName].filter(Boolean).join(' ') || otherMember.user.email || 'Unknown',
+                        avatarUrl: otherMember.user.profileImageUrl,
+                      },
+                      chatId,
+                      'video',
+                      [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.email || 'Unknown',
+                      user?.profileImageUrl
+                    )}
+                    title="Video call"
+                  >
+                    <Video className="w-5 h-5" />
+                  </Button>
+                </>
               )}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => handleDeleteChat()} className="text-destructive">
-                <Trash2 className="w-4 h-4 mr-2" />
-                Delete chat
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="text-muted-foreground rounded-full h-9 w-9">
+                    <MoreVertical className="w-5 h-5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuLabel>Chat Options</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => handleClearHistoryForMe()}>Clear history for me</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleClearHistoryForAll()}>Clear history for everyone</DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  {!chat?.isGroup && otherMember && (
+                    <DropdownMenuItem
+                      onClick={() => { blockStatus?.blocked ? handleUnblockUser() : handleBlockUser(); }}
+                      className={blockStatus?.blocked ? undefined : 'text-destructive'}
+                    >
+                      {blockStatus?.blocked ? 'Unblock user' : 'Block user'}
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => handleDeleteChat()} className="text-destructive">
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Delete chat
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </>
         )}
       </header>
@@ -430,23 +594,17 @@ OK will remove them for everyone, Cancel will keep them visible to others and on
                 const isMine = msg.senderId === user?.id;
                 const showAvatar = !isMine && (!messages[idx - 1] || messages[idx - 1].senderId !== msg.senderId);
                 const isSelected = selectedMessages.has(msg.id);
-                
+
                 return (
-                  <motion.div 
+                  <motion.div
                     key={msg.id}
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     className={`flex items-end gap-2 ${isMine ? 'justify-end' : 'justify-start'} cursor-pointer`}
-                    onClick={() => {
-                      if (selectionMode) {
-                        toggleMessageSelection(msg.id);
-                      }
-                    }}
+                    onClick={() => { if (selectionMode) toggleMessageSelection(msg.id); }}
                     onContextMenu={(e) => {
                       e.preventDefault();
-                      if (!selectionMode) {
-                        setSelectionMode(true);
-                      }
+                      if (!selectionMode) setSelectionMode(true);
                       toggleMessageSelection(msg.id);
                     }}
                   >
@@ -454,9 +612,7 @@ OK will remove them for everyone, Cancel will keep them visible to others and on
                     {selectionMode && (
                       <div className="flex items-center shrink-0 self-center">
                         <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
-                          isSelected 
-                            ? 'bg-primary border-primary text-primary-foreground' 
-                            : 'border-muted-foreground/40 bg-transparent'
+                          isSelected ? 'bg-primary border-primary text-primary-foreground' : 'border-muted-foreground/40 bg-transparent'
                         }`}>
                           {isSelected && <CheckCircle2 className="w-4 h-4" />}
                         </div>
@@ -475,135 +631,39 @@ OK will remove them for everyone, Cancel will keep them visible to others and on
                         )}
                       </div>
                     )}
-                    
+
                     <div className={`relative max-w-[75%] md:max-w-[60%] px-4 py-2.5 shadow-sm transition-all
-                      ${isMine 
-                        ? 'bg-primary text-primary-foreground rounded-2xl rounded-br-sm' 
+                      ${isMine
+                        ? 'bg-primary text-primary-foreground rounded-2xl rounded-br-sm'
                         : 'bg-card text-card-foreground rounded-2xl rounded-bl-sm border border-border/50'
                       }
                       ${isSelected ? 'ring-2 ring-primary/50 scale-[0.98]' : ''}
-                    `}
-                    >
-                      {msg.content && <p className="text-[15px] leading-relaxed break-words">{msg.content}</p>}
-                      
-                      {/* Attachments */}
-                      {(msg as any).attachments && (msg as any).attachments.length > 0 && (
-                        <div className={`${msg.content ? 'mt-3 pt-3 border-t border-current border-opacity-20' : ''} space-y-2`}>
-                          {(msg as any).attachments.map((file: any, idx: number) => {
-                            // ── Call history entry ──
-                            const isCallEntry = file.type?.startsWith('call/');
-                            if (isCallEntry) {
-                              try {
-                                const meta = JSON.parse(file.url || '{}');
-                                const callType = meta.callType || 'audio';
-                                const reason = meta.endReason || 'hangup';
-                                const dur = meta.duration;
-                                const durationStr = dur
-                                  ? `${Math.floor(dur / 60000).toString().padStart(2, '0')}:${Math.floor((dur % 60000) / 1000).toString().padStart(2, '0')}`
-                                  : null;
-                                const icon = callType === 'video' ? '🎥' : '📞';
-                                const labels: Record<string, string> = {
-                                  hangup: durationStr ? `Call · ${durationStr}` : 'Call ended',
-                                  rejected: 'Call declined',
-                                  busy: 'User busy',
-                                  missed: 'Missed call',
-                                  error: 'Call failed',
-                                };
-                                return (
-                                  <div key={idx} className="flex items-center gap-2 text-xs opacity-80">
-                                    <span>{icon}</span>
-                                    <span>{labels[reason] || 'Call ended'}</span>
-                                  </div>
-                                );
-                              } catch {
-                                return <div key={idx} className="text-xs opacity-60">📞 Call</div>;
-                              }
-                            }
+                    `}>
+                      {msg.content && (() => {
+                        const emojiOnly = onlyEmoji(msg.content) && !(msg.attachments && msg.attachments.length);
+                        if (emojiOnly) {
+                          return (
+                            <div className="mt-1 flex items-center justify-center space-x-1 text-4xl">
+                              {Array.from(msg.content).map((ch, i) => <span key={i}>{ch}</span>)}
+                            </div>
+                          );
+                        }
+                        return <p className="text-[15px] leading-relaxed break-words">{msg.content}</p>;
+                      })()}
 
-                            const isImage = file.type.startsWith('image/');
-                            const isVideo = file.type.startsWith('video/');
-                            const isAudio = file.type.startsWith('audio/');
-                            
-                            if (isImage) {
-                              return (
-                                <a
-                                  key={idx}
-                                  href={file.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="block rounded-lg overflow-hidden hover:opacity-90 transition-opacity"
-                                >
-                                  <img
-                                    src={file.url}
-                                    alt={file.name}
-                                    className="max-w-xs max-h-96 rounded-lg"
-                                  />
-                                </a>
-                              );
-                            } else if (isVideo) {
-                              return (
-                                <video
-                                  key={idx}
-                                  src={file.url}
-                                  controls
-                                  className="max-w-xs rounded-lg"
-                                />
-                              );
-                            } else if (isAudio) {
-                              return (
-                                <div
-                                  key={idx}
-                                  className="flex items-center gap-2 p-3 rounded-lg bg-black/10 dark:bg-white/10 hover:bg-black/20 dark:hover:bg-white/20 transition-colors max-w-xs"
-                                >
-                                  <audio
-                                    src={file.url}
-                                    controls
-                                    className="flex-1 h-8"
-                                  />
-                                  <a
-                                    href={file.url}
-                                    download={file.name}
-                                    className="p-1 rounded hover:bg-black/20 dark:hover:bg-white/20"
-                                    title="Download audio"
-                                  >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                    </svg>
-                                  </a>
-                                </div>
-                              );
-                            } else {
-                              return (
-                                <a
-                                  key={idx}
-                                  href={file.url}
-                                  download={file.name}
-                                  className="flex items-center gap-2 p-2 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
-                                >
-                                  <div className="flex-1 min-w-0">
-                                    <p className="text-xs font-medium truncate">{file.name}</p>
-                                  </div>
-                                </a>
-                              );
-                            }
-                          })}
-                        </div>
-                      )}
-                      
-                      <div className={`flex items-center justify-end gap-1 mt-1 
-                        ${isMine ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}
-                      >
+                      {/* Attachments */}
+                      {renderAttachments(msg)}
+
+                      <div className={`flex items-center justify-end gap-1 mt-1 ${isMine ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
                         <span className="text-[10px] uppercase font-medium tracking-wider">
                           {new Date(msg.createdAt!).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })}
                         </span>
-                        {/* Fake double check for visual flair */}
                         {isMine && (
                           <svg className="w-3 h-3 ml-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                           </svg>
                         )}
                       </div>
-                      
                     </div>
                   </motion.div>
                 );
@@ -622,10 +682,14 @@ OK will remove them for everyone, Cancel will keep them visible to others and on
             <div className="flex flex-wrap gap-2">
               {attachments.map((file, idx) => (
                 <div key={idx} className="relative flex items-center gap-2 bg-card border border-border/50 rounded-lg p-2 px-3">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium truncate text-foreground">{file.name}</p>
-                    <p className="text-xs text-muted-foreground">{file.type.split("/")[1]}</p>
-                  </div>
+                  {file.type === 'sticker' ? (
+                    <span className="text-2xl">{file.name}</span>
+                  ) : (
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium truncate text-foreground">{file.name}</p>
+                      <p className="text-xs text-muted-foreground">{file.type.split("/")[1]}</p>
+                    </div>
+                  )}
                   <button
                     type="button"
                     onClick={() => setAttachments((prev) => prev.filter((_, i) => i !== idx))}
@@ -644,15 +708,58 @@ OK will remove them for everyone, Cancel will keep them visible to others and on
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSend();
-                  }
+                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
                 }}
                 placeholder="Write a message..."
                 className="w-full max-h-32 min-h-[44px] bg-transparent resize-none border-0 focus:ring-0 text-[15px] py-2.5 px-3 scrollbar-hide"
                 rows={1}
               />
+            </div>
+
+            {/* Sticker picker toggle */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowStickerPicker(v => !v)}
+                className="h-12 w-12 rounded-full shrink-0 flex items-center justify-center bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors"
+              >
+                <Smile className="w-5 h-5" />
+              </button>
+              {showStickerPicker && (
+                <div className="absolute bottom-full mb-2 right-0 w-48 bg-card border border-border/50 rounded-lg shadow-lg p-2">
+                  {/* category tabs */}
+                  <div className="flex space-x-1 mb-1 overflow-x-auto scrollbar-hide">
+                    {EMOJI_CATEGORIES.map((cat, idx) => (
+                      <button
+                        key={cat.title}
+                        type="button"
+                        className={`px-2 py-1 rounded text-xs whitespace-nowrap ${
+                          selectedCategory === idx ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'
+                        }`}
+                        onClick={() => setSelectedCategory(idx)}
+                      >
+                        {cat.title}
+                      </button>
+                    ))}
+                  </div>
+                  {/* emoji grid */}
+                  <div className="grid grid-cols-5 gap-2 max-h-40 overflow-y-auto scrollbar-hide">
+                    {EMOJI_CATEGORIES[selectedCategory].items.map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        className="w-12 h-12 flex items-center justify-center text-2xl"
+                        onClick={() => {
+                          setInputValue(prev => prev + emoji);
+                          setShowStickerPicker(false);
+                        }}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* File upload button */}
@@ -662,11 +769,7 @@ OK will remove them for everyone, Cancel will keep them visible to others and on
               disabled={uploading}
               className="h-12 w-12 rounded-full shrink-0 flex items-center justify-center bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors disabled:opacity-50"
             >
-              {uploading ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                <Paperclip className="w-5 h-5" />
-              )}
+              {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Paperclip className="w-5 h-5" />}
             </button>
 
             <input
@@ -678,9 +781,9 @@ OK will remove them for everyone, Cancel will keep them visible to others and on
               accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx"
             />
 
-            <Button 
-              type="submit" 
-              size="icon" 
+            <Button
+              type="submit"
+              size="icon"
               disabled={(!inputValue.trim() && attachments.length === 0) || sendMessage.isPending}
               className="h-12 w-12 rounded-full shrink-0 bg-primary text-primary-foreground shadow-md shadow-primary/20 hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:transform-none"
             >
