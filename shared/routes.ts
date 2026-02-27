@@ -14,6 +14,7 @@ export const userSchema = z.object({
   profileImageUrl: z.string().nullable(),
   bio: z.string().nullable(),
   status: z.string().nullable(),
+  theme: z.enum(['light','dark']).default('light'),
   lastSeen: z.string().or(z.date()).nullable(),
   createdAt: z.string().or(z.date()).nullable(),
   updatedAt: z.string().or(z.date()).nullable(),
@@ -96,6 +97,7 @@ export const api = {
         lastName: z.string().optional(),
         bio: z.string().nullable().optional(),
         profileImageUrl: z.string().nullable().optional(),
+        theme: z.enum(['light','dark']).optional(),
       }),
       responses: {
         200: userSchema,

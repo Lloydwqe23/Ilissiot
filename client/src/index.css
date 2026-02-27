@@ -83,13 +83,14 @@
     --ring: 202 83% 55%;
 
     /* Sidebar Variables */
-    --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 222 47% 11%;
+    /* in dark mode the sidebar should be dark as well, with light text */
+    --sidebar-background: 215 28% 14%; /* same as card bg dark */
+    --sidebar-foreground: 210 40% 98%; /* light text */
     --sidebar-primary: 202 83% 45%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 214 32% 91%;
-    --sidebar-accent-foreground: 222 47% 11%;
-    --sidebar-border: 214 32% 85%;
+    --sidebar-accent: 214 32% 15%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 215 28% 17%;
     --sidebar-ring: 202 83% 55%;
   }
 }
@@ -102,6 +103,30 @@
     @apply bg-background text-foreground antialiased;
     font-family: var(--font-sans);
   }
+
+  /* text selection */
+  ::selection {
+    background-color: hsla(202, 83%, 50%, 0.3);
+    color: var(--foreground);
+  }
+  .dark ::selection {
+    background-color: hsla(202, 83%, 30%, 0.2);
+    color: var(--foreground);
+  }
+
+  /* dark-mode hover/active backgrounds for sidebar items */
+  .dark .hover\:bg-sidebar-accent\/:hover,
+  .dark .hover\:bg-sidebar-accent\/30:hover,
+  .dark .hover\:bg-sidebar-accent\/40:hover,
+  .dark .hover\:bg-sidebar-accent\/70:hover {
+    /* slightly brighter hover than default dark, but still subtle */
+    background-color: hsl(214,32%,14%) !important;
+  }
+  .dark .bg-sidebar-accent\/60 {
+    /* active selection slightly brighter than hover */
+    background-color: hsl(214,32%,18%) !important;
+  }
+
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-display);
     @apply tracking-tight;

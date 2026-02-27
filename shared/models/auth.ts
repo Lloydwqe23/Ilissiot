@@ -21,6 +21,7 @@ export const users = pgTable("users", {
   profileImageUrl: varchar("profile_image_url"),
   bio: text("bio"),
   status: varchar("status", { length: 20 }).default('offline'),
+  theme: varchar("theme", { length: 10 }).default('light'),
   lastSeen: timestamp("last_seen").defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

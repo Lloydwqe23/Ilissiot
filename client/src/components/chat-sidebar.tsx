@@ -64,8 +64,8 @@ function ChatSidebarItem({
         onClick={closeMobileSidebar}
         className={`flex items-center gap-3 w-full p-3 rounded-xl transition-all duration-200 ${
           isActive 
-            ? 'bg-sidebar-accent dark:bg-sidebar-accent' 
-            : 'hover:bg-sidebar-accent/70'
+            ? 'bg-sidebar-accent dark:bg-sidebar-accent/60' 
+            : 'hover:bg-sidebar-accent/70 dark:hover:bg-sidebar-accent/30'
         }`}
       >
         <div className="relative shrink-0">
@@ -80,17 +80,17 @@ function ChatSidebarItem({
 
         <div className="flex-1 overflow-hidden">
           <div className="flex justify-between items-baseline mb-1">
-            <span className="font-semibold truncate text-[15px] text-sidebar-foreground">
+            <span className="font-semibold truncate text-[15px] text-sidebar-foreground group-hover:text-sidebar-foreground">
               {displayName}
             </span>
             {lastMsg && (
-              <span className="text-[11px] whitespace-nowrap ml-2 text-sidebar-foreground/50">
+              <span className="text-[11px] whitespace-nowrap ml-2 text-sidebar-foreground/50 group-hover:text-sidebar-foreground/80">
                 {format(new Date(lastMsg.createdAt!), 'HH:mm')}
               </span>
             )}
           </div>
           <div className="flex justify-between items-center">
-            <span className="text-[13px] truncate text-sidebar-foreground/60">
+            <span className="text-[13px] truncate text-sidebar-foreground/60 group-hover:text-sidebar-foreground/80">
               {lastMsg ? (lastMsg.senderId === user?.id ? `You: ${lastMsg.content}` : lastMsg.content) : 'Started a chat'}
             </span>
             {chat.unreadCount ? (
@@ -181,7 +181,7 @@ export function ChatSidebar() {
             />
             <span className="font-display font-bold text-lg tracking-tight text-sidebar-foreground">Ilissiot</span>
           </div>
-          <Button variant="ghost" size="icon" className="w-8 h-8 rounded-full hover:bg-sidebar-accent" onClick={() => setSearchOpen(true)}>
+          <Button variant="ghost" size="icon" className="w-8 h-8 rounded-full hover:bg-sidebar-accent dark:hover:bg-sidebar-accent/30" onClick={() => setSearchOpen(true)}>
             <Edit className="w-4 h-4 text-sidebar-foreground/60" />
           </Button>
         </SidebarHeader>
@@ -231,7 +231,7 @@ export function ChatSidebar() {
         <SidebarFooter className="p-4 border-t border-sidebar-border">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="w-full flex justify-between items-center px-2 py-6 rounded-xl hover:bg-sidebar-accent">
+              <Button variant="ghost" className="w-full flex justify-between items-center px-2 py-6 rounded-xl hover:bg-sidebar-accent dark:hover:bg-sidebar-accent/30">
                 <div className="flex items-center gap-3">
                   <Avatar className="w-9 h-9 border border-border">
                     <AvatarImage src={user?.profileImageUrl || ""} />

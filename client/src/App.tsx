@@ -1,4 +1,5 @@
 import { Switch, Route } from "wouter";
+import { useEffect } from "react";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -10,6 +11,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { CallProvider } from "@/hooks/use-call";
 import { CallOverlay } from "@/components/call-overlay";
 import { Loader2 } from "lucide-react";
+import { ThemeProvider, useTheme } from "next-themes";
 
 // Wrapper component to handle routing based on Auth state
 function RootRouter() {
@@ -37,17 +39,32 @@ function RootRouter() {
   );
 }
 
+// component to apply user preference to theme provider
+function ThemeInitializer() {
+  const { user } = useAuth();
+  const { setTheme } = useTheme();
+  useEffect(() => {
+    if (user?.theme) {
+      setTheme(user.theme);
+    }
+  }, [user, setTheme]);
+  return null;
+}
+
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <CallProvider>
-          <Toaster />
-          <CallOverlay />
-          <RootRouter />
-        </CallProvider>
-      </TooltipProvider>
-    </QueryClientProvider>
+    <ThemeProvider attribute="class" defaultTheme="light">
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider>
+          <CallProvider>
+            <ThemeInitializer />
+            <Toaster />
+            <CallOverlay />
+            <RootRouter />
+          </CallProvider>
+        </TooltipProvider>
+      </QueryClientProvider>
+    </ThemeProvider>
   );
 }
 

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useTheme } from "next-themes";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +23,8 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
   const [bio, setBio] = useState(user?.bio || "");
   const [profileImageUrl, setProfileImageUrl] = useState(user?.profileImageUrl || "");
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [theme, setTheme] = useState<'light' | 'dark'>(user?.theme || 'light');
+  const { setTheme: applyTheme } = useTheme();
 
   // blocked users list view state
   const [view, setView] = useState<'profile' | 'blocked'>('profile');
@@ -35,6 +38,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
       setLastName(user.lastName || "");
       setBio(user.bio || "");
       setProfileImageUrl(user.profileImageUrl || "");
+      setTheme(user.theme || 'light');
     }
   }, [open, user]);
 
@@ -95,6 +99,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
       lastName,
       bio: bio.trim() || null,
       profileImageUrl: profileImageUrl || null,
+      theme,
     }, {
       onSuccess: () => {
         toast({ title: "Profile updated successfully" });
@@ -277,6 +282,34 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
               className="resize-none rounded-xl bg-muted/50 border-transparent focus:bg-background focus:border-primary transition-all"
               rows={3}
             />
+          </div>
+          {/* Theme selection */}
+          <div className="space-y-2">
+            <Label>Theme</Label>
+            <div className="flex items-center space-x-4">
+              <label className="flex items-center space-x-1">
+                <input
+                  type="radio"
+                  name="theme"
+                  value="light"
+                  checked={theme === 'light'}
+                  onChange={() => { setTheme('light'); applyTheme('light'); }}
+                  className="form-radio"
+                />
+                <span>Light</span>
+              </label>
+              <label className="flex items-center space-x-1">
+                <input
+                  type="radio"
+                  name="theme"
+                  value="dark"
+                  checked={theme === 'dark'}
+                  onChange={() => { setTheme('dark'); applyTheme('dark'); }}
+                  className="form-radio"
+                />
+                <span>Dark</span>
+              </label>
+            </div>
           </div>
             </>
           )}
