@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { format, isToday, isYesterday } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, AlertCircle, CheckCircle2, Phone, Video } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useChat, useBlockStatus, useBlockUser, useUnblockUser } from "@/hooks/use-chats";
 import { useMessages, useSendMessage, useMarkMessagesRead, useDeleteMessages } from "@/hooks/use-messages";
 import { useUserStatus, formatLastSeen } from "@/hooks/use-user-status";
+import { useCall } from "@/hooks/use-call";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
@@ -21,6 +22,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const sendMessage = useSendMessage();
   const markRead = useMarkMessagesRead();
   const deleteMessages = useDeleteMessages(chatId);
+  const call = useCall();
   
   const [inputValue, setInputValue] = useState("");
   const [attachments, setAttachments] = useState<Array<{name: string; url: string; type: string}>>([]);
@@ -328,7 +330,50 @@ OK will remove them for everyone, Cancel will keep them visible to others and on
           </div>
         </div>
         
-        <div className="flex items-center">
+        <div className="flex items-center gap-1">
+          {/* Call buttons (direct chats only) */}
+          {!chat?.isGroup && otherMember && (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-muted-foreground rounded-full h-9 w-9 hover:text-primary"
+                onClick={() => call.startCall(
+                  {
+                    userId: otherMember.userId,
+                    name: [otherMember.user.firstName, otherMember.user.lastName].filter(Boolean).join(' ') || otherMember.user.email || 'Unknown',
+                    avatarUrl: otherMember.user.profileImageUrl,
+                  },
+                  chatId,
+                  'audio',
+                  [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.email || 'Unknown',
+                  user?.profileImageUrl
+                )}
+                title="Voice call"
+              >
+                <Phone className="w-5 h-5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-muted-foreground rounded-full h-9 w-9 hover:text-primary"
+                onClick={() => call.startCall(
+                  {
+                    userId: otherMember.userId,
+                    name: [otherMember.user.firstName, otherMember.user.lastName].filter(Boolean).join(' ') || otherMember.user.email || 'Unknown',
+                    avatarUrl: otherMember.user.profileImageUrl,
+                  },
+                  chatId,
+                  'video',
+                  [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.email || 'Unknown',
+                  user?.profileImageUrl
+                )}
+                title="Video call"
+              >
+                <Video className="w-5 h-5" />
+              </Button>
+            </>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="text-muted-foreground rounded-full h-9 w-9">
@@ -439,12 +484,42 @@ OK will remove them for everyone, Cancel will keep them visible to others and on
                       ${isSelected ? 'ring-2 ring-primary/50 scale-[0.98]' : ''}
                     `}
                     >
-                      <p className="text-[15px] leading-relaxed break-words">{msg.content}</p>
+                      {msg.content && <p className="text-[15px] leading-relaxed break-words">{msg.content}</p>}
                       
                       {/* Attachments */}
                       {(msg as any).attachments && (msg as any).attachments.length > 0 && (
-                        <div className="mt-3 pt-3 border-t border-current border-opacity-20 space-y-2">
+                        <div className={`${msg.content ? 'mt-3 pt-3 border-t border-current border-opacity-20' : ''} space-y-2`}>
                           {(msg as any).attachments.map((file: any, idx: number) => {
+                            // ── Call history entry ──
+                            const isCallEntry = file.type?.startsWith('call/');
+                            if (isCallEntry) {
+                              try {
+                                const meta = JSON.parse(file.url || '{}');
+                                const callType = meta.callType || 'audio';
+                                const reason = meta.endReason || 'hangup';
+                                const dur = meta.duration;
+                                const durationStr = dur
+                                  ? `${Math.floor(dur / 60000).toString().padStart(2, '0')}:${Math.floor((dur % 60000) / 1000).toString().padStart(2, '0')}`
+                                  : null;
+                                const icon = callType === 'video' ? '🎥' : '📞';
+                                const labels: Record<string, string> = {
+                                  hangup: durationStr ? `Call · ${durationStr}` : 'Call ended',
+                                  rejected: 'Call declined',
+                                  busy: 'User busy',
+                                  missed: 'Missed call',
+                                  error: 'Call failed',
+                                };
+                                return (
+                                  <div key={idx} className="flex items-center gap-2 text-xs opacity-80">
+                                    <span>{icon}</span>
+                                    <span>{labels[reason] || 'Call ended'}</span>
+                                  </div>
+                                );
+                              } catch {
+                                return <div key={idx} className="text-xs opacity-60">📞 Call</div>;
+                              }
+                            }
+
                             const isImage = file.type.startsWith('image/');
                             const isVideo = file.type.startsWith('video/');
                             const isAudio = file.type.startsWith('audio/');

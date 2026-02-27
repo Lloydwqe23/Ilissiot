@@ -80,6 +80,24 @@ export async function registerRoutes(
             });
           }
         }
+        // ── WebRTC Call Signaling ──────────────────────────────────
+        else if (
+          message.type === WS_EVENTS.CALL_OFFER ||
+          message.type === WS_EVENTS.CALL_ANSWER ||
+          message.type === WS_EVENTS.CALL_ICE_CANDIDATE ||
+          message.type === WS_EVENTS.CALL_HANGUP ||
+          message.type === WS_EVENTS.CALL_REJECT ||
+          message.type === WS_EVENTS.CALL_BUSY
+        ) {
+          // Forward the signaling message to the target user
+          const payload = message.payload as { targetUserId: string; [key: string]: any };
+          if (payload.targetUserId && currentUserId) {
+            sendToUser(payload.targetUserId, {
+              type: message.type,
+              payload: { ...payload, fromUserId: currentUserId }
+            });
+          }
+        }
       } catch (e) {
         console.error('WS message error:', e);
       }

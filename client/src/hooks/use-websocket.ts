@@ -2,13 +2,18 @@ import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, WS_EVENTS, type MessageResponse, type ChatResponse } from '@shared/routes';
 import { setUserStatus, setOnlineUsers } from './use-user-status';
+import { useCall } from './use-call';
 
 export function useChatWebSocket(userId: string | undefined) {
   const queryClient = useQueryClient();
+  const call = useCall();
   const wsRef = useRef<WebSocket | null>(null);
   const isVisibleRef = useRef(!document.hidden);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const intentionalRef = useRef(false);
+  // Keep fresh references so the WS callback always sees the latest handlers
+  const callRef = useRef(call);
+  callRef.current = call;
 
   useEffect(() => {
     if (!userId) return;
@@ -34,6 +39,13 @@ export function useChatWebSocket(userId: string | undefined) {
           type: WS_EVENTS.CONNECT,
           payload: { userId },
         }));
+
+        // Register WS sender for call signaling
+        callRef.current.setWsSend((msg: any) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(msg));
+          }
+        });
       };
 
       ws.onmessage = (event) => {
@@ -113,6 +125,26 @@ export function useChatWebSocket(userId: string | undefined) {
           if (data.type === WS_EVENTS.ONLINE_USERS) {
             const { userIds } = data.payload;
             if (Array.isArray(userIds)) setOnlineUsers(userIds);
+          }
+
+          // ── WebRTC Call Signaling ─────────────────────────────────
+          if (data.type === WS_EVENTS.CALL_OFFER) {
+            callRef.current.handleIncomingOffer(data.payload);
+          }
+          if (data.type === WS_EVENTS.CALL_ANSWER) {
+            callRef.current.handleAnswer(data.payload);
+          }
+          if (data.type === WS_EVENTS.CALL_ICE_CANDIDATE) {
+            callRef.current.handleIceCandidate(data.payload);
+          }
+          if (data.type === WS_EVENTS.CALL_HANGUP) {
+            callRef.current.handleRemoteHangup();
+          }
+          if (data.type === WS_EVENTS.CALL_REJECT) {
+            callRef.current.handleRemoteReject();
+          }
+          if (data.type === WS_EVENTS.CALL_BUSY) {
+            callRef.current.handleRemoteBusy();
           }
 
         } catch (err) {

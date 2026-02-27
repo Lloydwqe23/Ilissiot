@@ -138,6 +138,13 @@ export const WS_EVENTS = {
   ONLINE_USERS: 'users:online',
   TYPING_START: 'typing:start',
   TYPING_STOP: 'typing:stop',
+  // WebRTC Call Signaling
+  CALL_OFFER: 'call:offer',
+  CALL_ANSWER: 'call:answer',
+  CALL_ICE_CANDIDATE: 'call:ice-candidate',
+  CALL_HANGUP: 'call:hangup',
+  CALL_REJECT: 'call:reject',
+  CALL_BUSY: 'call:busy',
 } as const;
 
 export interface WsMessage<T = unknown> {

@@ -7,6 +7,8 @@ import NotFound from "@/pages/not-found";
 import { AuthPage } from "@/pages/auth-page";
 import { ChatLayout } from "@/pages/chat-layout";
 import { useAuth } from "@/hooks/use-auth";
+import { CallProvider } from "@/hooks/use-call";
+import { CallOverlay } from "@/components/call-overlay";
 import { Loader2 } from "lucide-react";
 
 // Wrapper component to handle routing based on Auth state
@@ -39,8 +41,11 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <Toaster />
-        <RootRouter />
+        <CallProvider>
+          <Toaster />
+          <CallOverlay />
+          <RootRouter />
+        </CallProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );
