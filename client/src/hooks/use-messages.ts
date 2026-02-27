@@ -42,15 +42,17 @@ export function useSendMessage() {
   });
 }
 
+export type MessageDeleteItem = { id: number; forAll: boolean };
+
 export function useDeleteMessages(chatId: number) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (messageIds: number[]) => {
+    mutationFn: async (items: MessageDeleteItem[]) => {
       const res = await fetch('/api/messages/batch-delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messageIds }),
+        body: JSON.stringify({ items }),
         credentials: 'include',
       });
       if (!res.ok) throw new Error('Failed to delete messages');

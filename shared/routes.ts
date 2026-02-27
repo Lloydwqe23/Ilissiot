@@ -102,6 +102,39 @@ export const api = {
         400: errorSchemas.validation,
         401: errorSchemas.unauthorized,
       },
+    },
+    block: {
+      method: 'POST' as const,
+      path: '/api/users/:userId/block' as const,
+      responses: {
+        200: z.object({ success: z.boolean() }),
+        400: errorSchemas.validation,
+        401: errorSchemas.unauthorized,
+      },
+    },
+    unblock: {
+      method: 'POST' as const,
+      path: '/api/users/:userId/unblock' as const,
+      responses: {
+        200: z.object({ success: z.boolean() }),
+        401: errorSchemas.unauthorized,
+      },
+    },
+    blockStatus: {
+      method: 'GET' as const,
+      path: '/api/users/:userId/block-status' as const,
+      responses: {
+        200: z.object({ blocked: z.boolean(), blockedBy: z.boolean() }),
+        401: errorSchemas.unauthorized,
+      },
+    },
+    blockedList: {
+      method: 'GET' as const,
+      path: '/api/users/blocked' as const,
+      responses: {
+        200: z.array(userSchema),
+        401: errorSchemas.unauthorized,
+      },
     }
   },
   chats: {
@@ -176,6 +209,34 @@ export const api = {
       responses: {
         200: z.object({ success: z.boolean() }),
         401: errorSchemas.unauthorized,
+      },
+    },
+    // message deletion endpoints
+    delete: {
+      method: 'POST' as const,
+      path: '/api/messages/:messageId/delete' as const,
+      input: z.object({
+        forAll: z.boolean().optional(),
+      }).optional(),
+      responses: {
+        200: z.object({ success: z.boolean() }),
+        401: errorSchemas.unauthorized,
+        404: errorSchemas.notFound,
+      },
+    },
+    batchDelete: {
+      method: 'POST' as const,
+      path: '/api/messages/batch-delete' as const,
+      input: z.object({
+        items: z.array(z.object({
+          id: z.number(),
+          forAll: z.boolean(),
+        })),
+      }),
+      responses: {
+        200: z.object({ success: z.boolean() }),
+        401: errorSchemas.unauthorized,
+        400: errorSchemas.validation,
       },
     }
   }

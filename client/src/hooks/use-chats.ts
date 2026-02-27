@@ -50,3 +50,83 @@ export function useCreateDirectChat() {
     },
   });
 }
+
+export function useDeleteChat() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (chatId: number) => {
+      const url = buildUrl(api.chats.get.path, { id: chatId });
+      const res = await fetch(url, {
+        method: 'DELETE',
+        credentials: 'include'
+      });
+      if (!res.ok) {
+        throw new Error('Failed to delete chat');
+      }
+      return true;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.chats.list.path] });
+    }
+  });
+}
+
+// blocking hooks
+export function useBlockUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (userId: string) => {
+      const url = buildUrl(api.users.block.path, { userId });
+      const res = await fetch(url, { method: api.users.block.method, credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to block user');
+      return res.json();
+    },
+    onSuccess: () => {
+      // invalidate any relevant queries
+      queryClient.invalidateQueries();
+    }
+  });
+}
+
+export function useUnblockUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (userId: string) => {
+      const url = buildUrl(api.users.unblock.path, { userId });
+      const res = await fetch(url, { method: api.users.unblock.method, credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to unblock user');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries();
+    }
+  });
+}
+
+export function useBlockStatus(userId?: string | null) {
+  return useQuery({
+    queryKey: ['block-status', userId],
+    queryFn: async () => {
+      if (!userId) return { blocked: false, blockedBy: false };
+      const url = buildUrl(api.users.blockStatus.path, { userId });
+      const res = await fetch(url, { credentials: 'include' });
+      if (!res.ok) {
+        throw new Error('Failed to fetch block status');
+      }
+      return (await res.json()) as { blocked: boolean; blockedBy: boolean };
+    },
+    enabled: !!userId,
+  });
+}
+
+export function useBlockedUsers() {
+  return useQuery({
+    queryKey: ['blocked-users'],
+    queryFn: async () => {
+      const res = await fetch(api.users.blockedList.path, { credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to fetch blocked users');
+      const data = await res.json();
+      return api.users.blockedList.responses[200].parse(data);
+    },
+  });
+}

@@ -3,7 +3,7 @@ import { Link, useRoute } from "wouter";
 import { format } from "date-fns";
 import { Edit, LogOut, Settings, MoreVertical, ArrowLeft } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { useChats } from "@/hooks/use-chats";
+import { useChats, useDeleteChat, useBlockUser, useUnblockUser, useBlockStatus } from "@/hooks/use-chats";
 import { useUserStatus } from "@/hooks/use-user-status";
 import { 
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, 
@@ -26,6 +26,128 @@ function OnlineIndicator({ userId }: { userId: string | undefined }) {
   );
 }
 
+// component representing a single chat row with actions
+function ChatSidebarItem({
+  chat,
+  isActive,
+  closeMobileSidebar,
+}: {
+  chat: any;
+  isActive: boolean;
+  closeMobileSidebar: () => void;
+}) {
+  const { user } = useAuth();
+  const otherMember = !chat.isGroup
+    ? chat.members?.find((m: any) => m.userId !== user?.id)
+    : null;
+  const otherUserId = otherMember?.userId || null;
+  const displayName = (() => {
+    if (chat.isGroup) return chat.name;
+    if (!otherMember) return "Saved Messages";
+    const { firstName, lastName, email } = otherMember.user;
+    return [firstName, lastName].filter(Boolean).join(" ") || email || "Unknown";
+  })();
+  const avatarUrl = chat.isGroup ? chat.avatarUrl : otherMember?.user?.profileImageUrl;
+  const initials = displayName.charAt(0).toUpperCase();
+
+  const lastMsg = chat.lastMessage;
+
+  const deleteChatMutation = useDeleteChat();
+  const blockStatus = useBlockStatus(otherUserId);
+  const blockMutation = useBlockUser();
+  const unblockMutation = useUnblockUser();
+
+  return (
+    <SidebarMenuItem key={chat.id} className="mb-1 relative group">
+      <Link
+        href={`/chat/${chat.id}`}
+        onClick={closeMobileSidebar}
+        className={`flex items-center gap-3 w-full p-3 rounded-xl transition-all duration-200 ${
+          isActive 
+            ? 'bg-sidebar-accent dark:bg-sidebar-accent' 
+            : 'hover:bg-sidebar-accent/70'
+        }`}
+      >
+        <div className="relative shrink-0">
+          <Avatar className="w-12 h-12 border border-black/5">
+            <AvatarImage src={avatarUrl || ""} />
+            <AvatarFallback className="text-sm font-medium bg-primary/10 text-primary">
+              {initials}
+            </AvatarFallback>
+          </Avatar>
+          <OnlineIndicator userId={otherUserId} />
+        </div>
+
+        <div className="flex-1 overflow-hidden">
+          <div className="flex justify-between items-baseline mb-1">
+            <span className="font-semibold truncate text-[15px] text-sidebar-foreground">
+              {displayName}
+            </span>
+            {lastMsg && (
+              <span className="text-[11px] whitespace-nowrap ml-2 text-sidebar-foreground/50">
+                {format(new Date(lastMsg.createdAt!), 'HH:mm')}
+              </span>
+            )}
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-[13px] truncate text-sidebar-foreground/60">
+              {lastMsg ? (lastMsg.senderId === user?.id ? `You: ${lastMsg.content}` : lastMsg.content) : 'Started a chat'}
+            </span>
+            {chat.unreadCount ? (
+              <span className={`min-w-5 h-5 px-1.5 rounded-full flex items-center justify-center text-[10px] font-bold ml-2 ${'bg-primary text-primary-foreground'}`}>
+                {chat.unreadCount}
+              </span>
+              ) : null}
+            </div>
+          </div>
+        </Link>
+
+      {/* actions menu visible on hover */}
+      <div className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-6 w-6">
+              <MoreVertical className="w-4 h-4 text-sidebar-foreground/60" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuLabel>Chat</DropdownMenuLabel>
+            <DropdownMenuItem
+              onClick={() => {
+                if (confirm('Delete this chat? This cannot be undone.')) {
+                  deleteChatMutation.mutate(chat.id);
+                }
+              }}
+              className="text-destructive"
+            >
+              Delete
+            </DropdownMenuItem>
+            {otherUserId && (
+              <>
+                <DropdownMenuSeparator />
+                {blockStatus.data?.blocked ? (
+                  <DropdownMenuItem
+                    onClick={() => unblockMutation.mutate(otherUserId)}
+                  >
+                    Unblock user
+                  </DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem
+                    onClick={() => blockMutation.mutate(otherUserId)}
+                    className="text-destructive"
+                  >
+                    Block user
+                  </DropdownMenuItem>
+                )}
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </SidebarMenuItem>
+  );
+}
+
 export function ChatSidebar() {
   const { user, logout } = useAuth();
   const { data: chats, isLoading } = useChats();
@@ -41,19 +163,6 @@ export function ChatSidebar() {
     if (isMobile) setOpenMobile(false);
   };
 
-  const getChatDisplayName = (chat: any) => {
-    if (chat.isGroup) return chat.name;
-    const otherMember = chat.members?.find((m: any) => m.userId !== user?.id);
-    if (!otherMember) return "Saved Messages"; // Self chat
-    const { firstName, lastName, email } = otherMember.user;
-    return [firstName, lastName].filter(Boolean).join(" ") || email || "Unknown";
-  };
-
-  const getChatAvatar = (chat: any) => {
-    if (chat.isGroup) return chat.avatarUrl;
-    const otherMember = chat.members?.find((m: any) => m.userId !== user?.id);
-    return otherMember?.user?.profileImageUrl;
-  };
 
   return (
     <>
@@ -104,59 +213,13 @@ export function ChatSidebar() {
                 ) : (
                   chats?.map(chat => {
                     const isActive = activeChatId === chat.id;
-                    const displayName = getChatDisplayName(chat);
-                    const avatarUrl = getChatAvatar(chat);
-                    const initials = displayName.charAt(0).toUpperCase();
-                    const lastMsg = chat.lastMessage;
-                    const otherMember = !chat.isGroup
-                      ? chat.members?.find((m: any) => m.userId !== user?.id)
-                      : null;
-                    
                     return (
-                      <SidebarMenuItem key={chat.id} className="mb-1">
-                        <Link 
-                          href={`/chat/${chat.id}`}
-                          onClick={closeMobileSidebar}
-                          className={`flex items-center gap-3 w-full p-3 rounded-xl transition-all duration-200 ${
-                            isActive 
-                              ? 'bg-sidebar-accent dark:bg-sidebar-accent' 
-                              : 'hover:bg-sidebar-accent/70'
-                          }`}
-                        >
-                          <div className="relative shrink-0">
-                            <Avatar className="w-12 h-12 border border-black/5">
-                              <AvatarImage src={avatarUrl || ""} />
-                              <AvatarFallback className="text-sm font-medium bg-primary/10 text-primary">
-                                {initials}
-                              </AvatarFallback>
-                            </Avatar>
-                            <OnlineIndicator userId={otherMember?.userId} />
-                          </div>
-                          
-                          <div className="flex-1 overflow-hidden">
-                            <div className="flex justify-between items-baseline mb-1">
-                              <span className="font-semibold truncate text-[15px] text-sidebar-foreground">
-                                {displayName}
-                              </span>
-                              {lastMsg && (
-                                <span className="text-[11px] whitespace-nowrap ml-2 text-sidebar-foreground/50">
-                                  {format(new Date(lastMsg.createdAt!), 'HH:mm')}
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex justify-between items-center">
-                              <span className="text-[13px] truncate text-sidebar-foreground/60">
-                                {lastMsg ? (lastMsg.senderId === user?.id ? `You: ${lastMsg.content}` : lastMsg.content) : 'Started a chat'}
-                              </span>
-                              {chat.unreadCount ? (
-                                <span className={`min-w-5 h-5 px-1.5 rounded-full flex items-center justify-center text-[10px] font-bold ml-2 ${'bg-primary text-primary-foreground'}`}>
-                                  {chat.unreadCount}
-                                </span>
-                                ) : null}
-                              </div>
-                            </div>
-                          </Link>
-                      </SidebarMenuItem>
+                      <ChatSidebarItem
+                        key={chat.id}
+                        chat={chat}
+                        isActive={isActive}
+                        closeMobileSidebar={closeMobileSidebar}
+                      />
                     );
                   })
                 )}

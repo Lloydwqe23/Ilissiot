@@ -8,6 +8,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth } from "@/hooks/use-auth";
 import { useUpdateProfile } from "@/hooks/use-users";
 import { useToast } from "@/hooks/use-toast";
+import { useBlockedUsers, useUnblockUser } from "@/hooks/use-chats";
 import { Loader2, Camera, Trash2, X } from "lucide-react";
 
 export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
@@ -21,6 +22,11 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
   const [bio, setBio] = useState(user?.bio || "");
   const [profileImageUrl, setProfileImageUrl] = useState(user?.profileImageUrl || "");
   const [uploadingImage, setUploadingImage] = useState(false);
+
+  // blocked users list view state
+  const [view, setView] = useState<'profile' | 'blocked'>('profile');
+  const blockedUsersQuery = useBlockedUsers();
+  const unblockMut = useUnblockUser();
 
   // Sync state when dialog opens or user data changes
   useEffect(() => {
@@ -107,34 +113,79 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
       <DialogContent className="sm:max-w-[425px] rounded-2xl p-0 overflow-hidden border-border/50 shadow-2xl">
         <DialogHeader className="p-6 bg-muted/30 border-b border-border/50">
           <DialogTitle className="text-2xl font-display">Profile Settings</DialogTitle>
+          <div className="mt-2 flex space-x-4">
+            <button
+              type="button"
+              className={`text-sm font-medium ${view === 'profile' ? 'text-foreground' : 'text-muted-foreground'}`}
+              onClick={() => setView('profile')}
+            >
+              General
+            </button>
+            <button
+              type="button"
+              className={`text-sm font-medium ${view === 'blocked' ? 'text-foreground' : 'text-muted-foreground'}`}
+              onClick={() => setView('blocked')}
+            >
+              Blocked users
+            </button>
+          </div>
         </DialogHeader>
         
         <div className="p-6 space-y-6">
-          {/* Profile Image Section */}
-          <div className="flex items-center gap-6">
-            <div className="relative group">
-              <Avatar className="w-24 h-24 border-4 border-background shadow-lg">
-                <AvatarImage src={profileImageUrl || ""} alt={firstName || "User"} />
-                <AvatarFallback className="text-2xl bg-primary/10 text-primary">{initials}</AvatarFallback>
-              </Avatar>
-              
-              {/* Overlay for changing image */}
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploadingImage}
-                className="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-              >
-                {uploadingImage ? (
-                  <Loader2 className="w-6 h-6 text-white animate-spin" />
-                ) : (
-                  <Camera className="w-6 h-6 text-white" />
-                )}
-              </button>
-
-              {/* Remove image button */}
-              {profileImageUrl && (
-                <button
+          {view === 'blocked' ? (
+            <div>
+              {blockedUsersQuery.isLoading && <Loader2 className="animate-spin" />}
+              {blockedUsersQuery.data?.length === 0 && !blockedUsersQuery.isLoading && (
+                <p className="text-sm text-muted-foreground">You haven't blocked anyone.</p>
+              )}
+              {blockedUsersQuery.data?.map(u => (
+                <div key={u.id} className="flex items-center justify-between py-2">
+                  <div className="flex items-center gap-3">
+                    <Avatar className="w-8 h-8">
+                      <AvatarImage src={u.profileImageUrl || ''} />
+                      <AvatarFallback>{(u.firstName || u.email || 'U')[0]}</AvatarFallback>
+                    </Avatar>
+                    <span className="text-sm">{u.firstName || u.email || 'Unknown'}</span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      unblockMut.mutate(u.id, {
+                        onSuccess: () => blockedUsersQuery.refetch(),
+                      });
+                    }}
+                  >
+                    Unblock
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <>
+              {/* Profile Image Section */}
+              <div className="flex items-center gap-6">
+                <div className="relative group">
+                  <Avatar className="w-24 h-24 border-4 border-background shadow-lg">
+                    <AvatarImage src={profileImageUrl || ""} alt={firstName || "User"} />
+                    <AvatarFallback className="text-2xl bg-primary/10 text-primary">{initials}</AvatarFallback>
+                  </Avatar>
+                  {/* Overlay for changing image */}
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploadingImage}
+                    className="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                  >
+                    {uploadingImage ? (
+                      <Loader2 className="w-6 h-6 text-white animate-spin" />
+                    ) : (
+                      <Camera className="w-6 h-6 text-white" />
+                    )}
+                  </button>
+                  {/* Remove image button */}
+                  {profileImageUrl && (
+                    <button
                   type="button"
                   onClick={handleRemoveImage}
                   className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center shadow-md hover:bg-destructive/90 transition-colors z-10"
@@ -227,20 +278,23 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
               rows={3}
             />
           </div>
+            </>
+          )}
         </div>
-
         <div className="p-6 pt-0 flex justify-end gap-3">
           <Button variant="ghost" className="rounded-xl" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button 
-            onClick={handleSave} 
-            disabled={updateProfile.isPending || uploadingImage}
-            className="rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 hover:shadow-xl hover:-translate-y-0.5 transition-all"
-          >
-            {updateProfile.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Save Changes
-          </Button>
+          {view === 'profile' && (
+            <Button 
+              onClick={handleSave} 
+              disabled={updateProfile.isPending || uploadingImage}
+              className="rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 hover:shadow-xl hover:-translate-y-0.5 transition-all"
+            >
+              {updateProfile.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save Changes
+            </Button>
+          )}
         </div>
       </DialogContent>
     </Dialog>

@@ -65,9 +65,26 @@ export const messages = pgTable("messages", {
 });
 
 // --- RELATIONS ---
+
+// table to record one user blocking another
+export const blocks = pgTable("blocks", {
+  id: serial("id").primaryKey(),
+  blockerId: varchar("blocker_id").references(() => users.id, { onDelete: "cascade" }),
+  blockedId: varchar("blocked_id").references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+}, (table) => [
+  index("IDX_blocker_blocked").on(table.blockerId, table.blockedId),
+]);
+
+export type Block = typeof blocks.$inferSelect;
+
 export const usersRelations = relations(users, ({ many }) => ({
   memberships: many(chatMembers),
   messages: many(messages),
+  // blocksSent/blocksReceived simply reference the blocks table; Drizzle
+  // can infer the foreign keys automatically from our column definitions.
+  blocksSent: many(blocks),
+  blocksReceived: many(blocks),
 }));
 
 export const chatsRelations = relations(chats, ({ many }) => ({
@@ -102,7 +119,7 @@ export type CreateMessageRequest = InsertMessage;
 // Extended types for API responses
 export type ChatWithMembers = Chat & {
   members: (ChatMember & { user: User })[];
-  lastMessage?: Message | null;
+  lastMessage?: MessageWithSender | null;
   unreadCount?: number;
 };
 

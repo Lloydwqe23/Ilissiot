@@ -4,6 +4,7 @@ import {
   chatMembers,
   messages,
   users,
+  blocks,
   type User,
   type ChatWithMembers,
   type MessageWithSender,
@@ -16,6 +17,10 @@ export interface IStorage {
   // User operations
   searchUsers(query: string, currentUserId: string): Promise<User[]>;
   updateUser(id: string, updates: Partial<User>): Promise<User>;
+  blockUser(blockerId: string, blockedId: string): Promise<void>;
+  unblockUser(blockerId: string, blockedId: string): Promise<void>;
+  getBlockStatus(currentUserId: string, otherUserId: string): Promise<{ blocked: boolean; blockedBy: boolean }>;
+  getBlockedUsers(userId: string): Promise<User[]>;
 
   // Chat operations
   getChatsForUser(userId: string): Promise<ChatWithMembers[]>;
@@ -29,12 +34,60 @@ export interface IStorage {
   markMessagesAsRead(chatId: number, userId: string): Promise<void>;
   clearMessagesForUser(chatId: number, userId: string): Promise<void>;
   clearMessagesForAll(chatId: number): Promise<void>;
-  deleteMessage(messageId: number): Promise<void>;
-  deleteMessages(messageIds: number[]): Promise<void>;
+  clearMyMessagesForAll(chatId: number, userId: string): Promise<void>;
+  // deletion helpers – scoped so users can remove their own messages for themselves or for everyone
+  deleteMessage(messageId: number, userId: string, forAll?: boolean): Promise<void>;
+  deleteMessages(items: { id: number; forAll: boolean }[], userId: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
+  // blocking helpers
+  async blockUser(blockerId: string, blockedId: string): Promise<void> {
+    // avoid duplicate entries
+    await db.insert(blocks).values({ blockerId, blockedId }).onConflictDoNothing().execute();
+  }
+
+  async unblockUser(blockerId: string, blockedId: string): Promise<void> {
+    await db
+      .delete(blocks)
+      .where(
+        and(
+          eq(blocks.blockerId, blockerId),
+          eq(blocks.blockedId, blockedId)
+        )
+      );
+  }
+
+  async isBlocked(blockerId: string, blockedId: string): Promise<boolean> {
+    const [row] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(blocks)
+      .where(
+        and(
+          eq(blocks.blockerId, blockerId),
+          eq(blocks.blockedId, blockedId)
+        )
+      );
+    return Number(row.count) > 0;
+  }
+
+  async getBlockStatus(currentUserId: string, otherUserId: string): Promise<{ blocked: boolean; blockedBy: boolean }> {
+    const blocked = await this.isBlocked(currentUserId, otherUserId);
+    const blockedBy = await this.isBlocked(otherUserId, currentUserId);
+    return { blocked, blockedBy };
+  }
+
+  async getBlockedUsers(userId: string): Promise<User[]> {
+    const rows = await db
+      .select()
+      .from(users)
+      .innerJoin(blocks, eq(blocks.blockedId, users.id))
+      .where(eq(blocks.blockerId, userId));
+    // join returns {users, blocks} objects; map to user
+    return rows.map(r => r.users);
+  }
   async searchUsers(query: string, currentUserId: string): Promise<User[]> {
+    // Exclude yourself and any users you've blocked or who have blocked you
     return await db.select()
       .from(users)
       .where(
@@ -44,8 +97,8 @@ export class DatabaseStorage implements IStorage {
             ilike(users.lastName, `%${query}%`),
             ilike(users.email, `%${query}%`)
           ),
-          // Don't return the current user
-          sql`${users.id} != ${currentUserId}`
+          sql`${users.id} != ${currentUserId}`,
+          sql`NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = ${currentUserId} AND b.blocked_id = ${users.id}) OR (b.blocker_id = ${users.id} AND b.blocked_id = ${currentUserId}))`
         )
       )
       .limit(20);
@@ -125,9 +178,25 @@ export class DatabaseStorage implements IStorage {
       });
     }
 
+    // filter out direct chats where either user has blocked the other
+    const filtered: ChatWithMembers[] = [];
+    for (const chat of result) {
+      if (!chat.isGroup) {
+        const other = chat.members.find(m => m.userId !== userId);
+        if (other && other.userId) {
+          const blocked = await this.isBlocked(userId, other.userId);
+          const blockedBy = await this.isBlocked(other.userId, userId);
+          if (blocked || blockedBy) {
+            continue; // skip this chat entirely
+          }
+        }
+      }
+      filtered.push(chat);
+    }
+
     // Sort by last message date
     const uniqueChats = new Map<number, ChatWithMembers>();
-    result.forEach(chat => {
+    filtered.forEach(chat => {
       if (!uniqueChats.has(chat.id)) {
         uniqueChats.set(chat.id, chat);
       }
@@ -224,23 +293,30 @@ export class DatabaseStorage implements IStorage {
     // Filter out messages deleted for this user
     return msgs
       .filter(m => {
-        const deletedBy = m.message.deletedBy as string[] | null;
+        let deletedBy = m.message.deletedBy as any;
+        if (deletedBy && typeof deletedBy === 'string') {
+          try {
+            deletedBy = JSON.parse(deletedBy);
+          } catch {
+            deletedBy = [];
+          }
+        }
         if (!deletedBy || !Array.isArray(deletedBy)) return true;
         return !deletedBy.includes(userId);
       })
       .map(m => {
         const msg = m.message;
-        // Ensure createdAt is in ISO format with Z for UTC
-        const messageWithISODate = {
+        // normalize createdAt to Date
+        const created: Date | null = msg.createdAt
+          ? msg.createdAt instanceof Date
+            ? msg.createdAt
+            : new Date(msg.createdAt as any)
+          : null;
+        return {
           ...msg,
-          createdAt: msg.createdAt instanceof Date 
-            ? msg.createdAt.toISOString() 
-            : typeof msg.createdAt === 'string' 
-              ? msg.createdAt
-              : new Date(msg.createdAt).toISOString(),
-          sender: m.sender
+          createdAt: created,
+          sender: m.sender,
         };
-        return messageWithISODate;
       })
       .reverse();
   }
@@ -255,19 +331,21 @@ export class DatabaseStorage implements IStorage {
     await db
       .update(chats)
       .set({ updatedAt: new Date() })
-      .where(eq(chats.id, messageData.chatId));
+      .where(eq(chats.id, messageData.chatId as number));
 
     // Fetch the sender to return the full object
     const [sender] = await db.select().from(users).where(eq(users.id, messageData.senderId));
 
-    // Ensure createdAt is in ISO format with Z for UTC
+    // normalise createdAt to Date
+    const created: Date | null = message.createdAt
+      ? message.createdAt instanceof Date
+        ? message.createdAt
+        : new Date(message.createdAt as any)
+      : null;
+
     return {
       ...message,
-      createdAt: message.createdAt instanceof Date 
-        ? message.createdAt.toISOString() 
-        : typeof message.createdAt === 'string' 
-          ? message.createdAt
-          : new Date(message.createdAt).toISOString(),
+      createdAt: created,
       sender
     };
   }
@@ -285,39 +363,72 @@ export class DatabaseStorage implements IStorage {
       );
   }
 
-  async clearMessagesForUser(chatId: number, userId: string): Promise<void> {
-    // Mark all messages in this chat as deleted for this user by adding userId to deletedBy array
+  // return number of rows that were marked deleted for this user
+  async clearMessagesForUser(chatId: number, userId: string): Promise<number> {
+    // retrieve ids first so we know what to update
     const allMessages = await db
-      .select()
+      .select({ id: messages.id, deletedBy: messages.deletedBy })
       .from(messages)
       .where(eq(messages.chatId, chatId));
 
+    let count = 0;
     for (const msg of allMessages) {
-      const deletedBy = (msg.deletedBy as string[]) || [];
+      let deletedBy: string[] = [];
+      if (msg.deletedBy) {
+        deletedBy = typeof msg.deletedBy === 'string'
+          ? JSON.parse(msg.deletedBy as any)
+          : (msg.deletedBy as string[]);
+      }
       if (!deletedBy.includes(userId)) {
         deletedBy.push(userId);
+        await db
+          .update(messages)
+          .set({ deletedBy: deletedBy })
+          .where(eq(messages.id, msg.id));
+        count++;
       }
-      
+    }
+    return count;
+  }
+
+  // Helper that will either hard-delete or mark as deleted for a specific user depending on
+  // whether "forAll" was requested and whether the user is the sender of the message.
+  async deleteMessage(messageId: number, userId: string, forAll?: boolean): Promise<void> {
+    // fetch the message so we know sender and current deletedBy array
+    const [msg] = await db
+      .select()
+      .from(messages)
+      .where(eq(messages.id, messageId));
+    if (!msg) return;
+
+    const isSender = msg.senderId === userId;
+    const shouldHardDelete = forAll && isSender;
+
+    if (shouldHardDelete) {
+      // remove the row entirely
       await db
-        .update(messages)
-        .set({ deletedBy: deletedBy })
-        .where(eq(messages.id, msg.id));
+        .delete(messages)
+        .where(eq(messages.id, messageId));
+    } else {
+      // mark as deleted for this user only
+      const deletedBy: string[] = (msg.deletedBy as string[]) || [];
+      if (!deletedBy.includes(userId)) {
+        deletedBy.push(userId);
+        await db
+          .update(messages)
+          .set({ deletedBy })
+          .where(eq(messages.id, messageId));
+      }
     }
   }
 
-  async deleteMessage(messageId: number): Promise<void> {
-    // Hard-delete the message for both users
-    await db
-      .delete(messages)
-      .where(eq(messages.id, messageId));
-  }
-
-  async deleteMessages(messageIds: number[]): Promise<void> {
-    // Hard-delete multiple messages for both users
-    if (messageIds.length === 0) return;
-    await db
-      .delete(messages)
-      .where(inArray(messages.id, messageIds));
+  // Batch version of the above; items include the id and whether the user asked for a
+  // deletion-for-everyone.  The implementation simply loops and reuses deleteMessage.
+  async deleteMessages(items: { id: number; forAll: boolean }[], userId: string): Promise<void> {
+    if (items.length === 0) return;
+    for (const { id, forAll } of items) {
+      await this.deleteMessage(id, userId, forAll);
+    }
   }
 
   async clearMessagesForAll(chatId: number): Promise<void> {
@@ -325,6 +436,18 @@ export class DatabaseStorage implements IStorage {
     await db
       .delete(messages)
       .where(eq(messages.chatId, chatId));
+  }
+
+  async clearMyMessagesForAll(chatId: number, userId: string): Promise<void> {
+    // remove only messages sent by the given user
+    await db
+      .delete(messages)
+      .where(
+        and(
+          eq(messages.chatId, chatId),
+          eq(messages.senderId, userId)
+        )
+      );
   }
 
   async deleteChat(chatId: number): Promise<void> {

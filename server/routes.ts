@@ -139,7 +139,7 @@ export async function registerRoutes(
     }
   });
 
-  // Search users
+  // Search users (automatically filters out blocked relationships)
   app.get('/api/users/search', isAuthenticated, async (req: any, res) => {
     try {
       const query = req.query.q as string;
@@ -151,6 +151,60 @@ export async function registerRoutes(
       res.json(users);
     } catch (err) {
       console.error("Search users error:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Block another user
+  app.post('/api/users/:userId/block', isAuthenticated, async (req: any, res) => {
+    try {
+      const targetId = req.params.userId as string;
+      const currentUserId = req.user.claims.sub;
+      if (targetId === currentUserId) {
+        return res.status(400).json({ message: "Cannot block yourself" });
+      }
+      await storage.blockUser(currentUserId, targetId);
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Block user error:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Get current user's blocked users list
+  app.get('/api/users/blocked', isAuthenticated, async (req: any, res) => {
+    try {
+      const currentUserId = req.user.claims.sub;
+      const users = await storage.getBlockedUsers(currentUserId);
+      res.json(users);
+    } catch (err) {
+      console.error("Get blocked users error:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Unblock user
+  app.post('/api/users/:userId/unblock', isAuthenticated, async (req: any, res) => {
+    try {
+      const targetId = req.params.userId as string;
+      const currentUserId = req.user.claims.sub;
+      await storage.unblockUser(currentUserId, targetId);
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Unblock user error:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Get block status for a user pair
+  app.get('/api/users/:userId/block-status', isAuthenticated, async (req: any, res) => {
+    try {
+      const otherId = req.params.userId as string;
+      const currentUserId = req.user.claims.sub;
+      const status = await storage.getBlockStatus(currentUserId, otherId);
+      res.json(status);
+    } catch (err) {
+      console.error("Block status error:", err);
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -286,24 +340,28 @@ export async function registerRoutes(
   app.post('/api/chats/:chatId/clear-for-me', isAuthenticated, async (req: any, res) => {
     try {
       const chatId = Number(req.params.chatId);
-      const userId = req.user.claims.sub;
-      
+      const userId = req.user.claims.sub as string;
+      console.log('clear-for-me called', { chatId, userId });
+
       // Verify membership
       const chat = await storage.getChat(chatId);
       if (!chat) return res.status(404).json({ message: "Chat not found" });
-      
       if (!chat.members.some(m => m.userId === userId)) {
         return res.status(401).json({ message: "Unauthorized" });
       }
 
-      await storage.clearMessagesForUser(chatId, userId);
-      res.json({ success: true });
+      const cleared = await storage.clearMessagesForUser(chatId, userId);
+      console.log(`marked ${cleared} messages deleted for user ${userId}`);
+      res.json({ success: true, cleared });
     } catch (err) {
+      console.error('error in clear-for-me', err);
       res.status(500).json({ message: "Internal server error" });
     }
   });
 
-  // Clear chat history for everyone
+  // Clear chat history for everyone – removes all messages from your view and
+  // deletes your sent messages from the conversation so only the other person's
+  // text remains on their side.
   app.post('/api/chats/:chatId/clear-for-all', isAuthenticated, async (req: any, res) => {
     try {
       const chatId = Number(req.params.chatId);
@@ -317,7 +375,33 @@ export async function registerRoutes(
         return res.status(401).json({ message: "Unauthorized" });
       }
 
-      await storage.clearMessagesForAll(chatId);
+      // First mark all messages as deleted for the current user
+      await storage.clearMessagesForUser(chatId, userId);
+      // Then remove any messages they sent so other member only sees their own
+      await storage.clearMyMessagesForAll(chatId, userId);
+
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Clear chat history for everyone (only your own sent messages)
+  app.post('/api/chats/:chatId/clear-for-all', isAuthenticated, async (req: any, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const userId = req.user.claims.sub;
+      
+      // Verify membership
+      const chat = await storage.getChat(chatId);
+      if (!chat) return res.status(404).json({ message: "Chat not found" });
+      
+      if (!chat.members.some(m => m.userId === userId)) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      // only delete messages where senderId === current user
+      await storage.clearMyMessagesForAll(chatId, userId);
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ message: "Internal server error" });
@@ -345,27 +429,30 @@ export async function registerRoutes(
     }
   });
 
-  // Delete single message (hard-delete for both users)
-  app.delete('/api/messages/:messageId', isAuthenticated, async (req: any, res) => {
+  // Delete single message.  `forAll` tells us whether the user wishes to remove it for
+  // everyone; if they are not the sender we silently downgrade to a personal delete.
+  app.post('/api/messages/:messageId/delete', isAuthenticated, async (req: any, res) => {
     try {
       const messageId = Number(req.params.messageId);
-      
-      await storage.deleteMessage(messageId);
+      const { forAll } = req.body as { forAll?: boolean };
+      const userId = req.user.claims.sub as string;
+
+      await storage.deleteMessage(messageId, userId, Boolean(forAll));
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ message: "Internal server error" });
     }
   });
 
-  // Batch delete messages (hard-delete for both users)
+  // Batch delete, accepts an array with per-message flags
   app.post('/api/messages/batch-delete', isAuthenticated, async (req: any, res) => {
     try {
-      const { messageIds } = req.body;
-      if (!Array.isArray(messageIds) || messageIds.length === 0) {
-        return res.status(400).json({ message: "messageIds must be a non-empty array" });
+      const { items } = req.body as { items?: Array<{ id: number; forAll: boolean }> };
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ message: "items must be a non-empty array" });
       }
-      
-      await storage.deleteMessages(messageIds.map(Number));
+      const userId = req.user.claims.sub as string;
+      await storage.deleteMessages(items.map(i => ({ id: Number(i.id), forAll: Boolean(i.forAll) })), userId);
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ message: "Internal server error" });

@@ -3,7 +3,7 @@ import { format, isToday, isYesterday } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
 import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, AlertCircle, CheckCircle2 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { useChat } from "@/hooks/use-chats";
+import { useChat, useBlockStatus, useBlockUser, useUnblockUser } from "@/hooks/use-chats";
 import { useMessages, useSendMessage, useMarkMessagesRead, useDeleteMessages } from "@/hooks/use-messages";
 import { useUserStatus, formatLastSeen } from "@/hooks/use-user-status";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -122,14 +122,20 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   );
 
   const handleClearHistoryForMe = async () => {
-    if (!confirm("Clear chat history for you only?")) return;
+    if (!confirm("Clear all chat history from your view only?")) return;
     try {
       const response = await fetch(`/api/chats/${chatId}/clear-for-me`, {
         method: 'POST',
+        credentials: 'include',
       });
       if (response.ok) {
-        alert("Chat history cleared for you");
+        const data = await response.json();
+        const msg = data.cleared != null ? ` (${data.cleared} messages)` : '';
+        alert("Chat history cleared for you" + msg);
         window.location.reload();
+      } else {
+        const text = await response.text();
+        alert("Failed to clear history: " + response.status + " " + text);
       }
     } catch (err) {
       console.error("Error clearing history:", err);
@@ -138,14 +144,18 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   };
 
   const handleClearHistoryForAll = async () => {
-    if (!confirm("Clear chat history for everyone? This cannot be undone.")) return;
+    if (!confirm("This will remove every message from your view and delete your own messages for the other person. Proceed?")) return;
     try {
       const response = await fetch(`/api/chats/${chatId}/clear-for-all`, {
         method: 'POST',
+        credentials: 'include',
       });
       if (response.ok) {
-        alert("Chat history cleared for everyone");
+        alert("Conversation cleared for you and your messages removed for the other user");
         window.location.reload();
+      } else {
+        const text = await response.text();
+        alert("Failed to clear history: " + response.status + " " + text);
       }
     } catch (err) {
       console.error("Error clearing history:", err);
@@ -168,6 +178,31 @@ export function ChatWindow({ chatId }: { chatId: number }) {
     }
   };
 
+  const { data: blockStatus } = useBlockStatus(otherMember?.userId);
+  const blockMut = useBlockUser();
+  const unblockMut = useUnblockUser();
+
+  const handleBlockUser = async () => {
+    if (!otherMember) return;
+    if (confirm('Are you sure you want to block this user?')) {
+      blockMut.mutate(otherMember.userId, {
+        onSuccess: () => {
+          alert('User blocked');
+          navigate('/');
+        }
+      });
+    }
+  };
+
+  const handleUnblockUser = async () => {
+    if (!otherMember) return;
+    unblockMut.mutate(otherMember.userId, {
+      onSuccess: () => {
+        alert('User unblocked');
+      }
+    });
+  };
+
   const toggleMessageSelection = (messageId: number) => {
     setSelectedMessages(prev => {
       const next = new Set(prev);
@@ -186,8 +221,39 @@ export function ChatWindow({ chatId }: { chatId: number }) {
 
   const handleDeleteSelected = () => {
     if (selectedMessages.size === 0) return;
-    if (!confirm(`Delete ${selectedMessages.size} message(s) for everyone? This cannot be undone.`)) return;
-    deleteMessages.mutate(Array.from(selectedMessages), {
+
+    // build list of items with forAll flag
+    const items: Array<{ id: number; forAll: boolean }> = [];
+    let ownCount = 0;
+    selectedMessages.forEach(id => {
+      const msg = messages?.find(m => m.id === id);
+      const isMine = msg?.senderId === user?.id;
+      // default forAll true for your own messages; will adjust below if needed
+      items.push({ id, forAll: !!isMine });
+      if (isMine) ownCount += 1;
+    });
+    const otherCount = items.length - ownCount;
+
+    // determine what prompt to show and possibly adjust flags
+    if (otherCount === 0) {
+      // only our own messages – ask user if they want to remove for everyone or just self
+      const deleteForEveryone = confirm(
+        `You are deleting ${items.length} message(s).
+OK will remove them for everyone, Cancel will keep them visible to others and only delete for you.`
+      );
+      items.forEach(i => (i.forAll = deleteForEveryone));
+      if (!deleteForEveryone && items.length === 0) return; // just guard
+    } else if (ownCount === 0) {
+      // only others' messages – just remove for self
+      if (!confirm(`Delete ${items.length} message(s) for yourself? You cannot remove other users' messages.`)) return;
+      // all flags are already false
+    } else {
+      // mix of your own and others
+      if (!confirm(`Delete ${ownCount} of your messages for everyone and ${otherCount} messages just for yourself?`)) return;
+      // flags already set correctly
+    }
+
+    deleteMessages.mutate(items, {
       onSuccess: () => {
         setSelectedMessages(new Set());
         setSelectionMode(false);
@@ -241,7 +307,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
               className="flex items-center gap-2"
             >
               {deleteMessages.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-              Delete for everyone
+              Delete
             </Button>
           </>
         ) : (
@@ -251,7 +317,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
           
           <Avatar className="w-10 h-10 border border-border/50">
             <AvatarImage src={avatarUrl || ""} />
-            <AvatarFallback className="bg-primary/10 text-primary font-medium">{displayName[0]}</AvatarFallback>
+            <AvatarFallback className="bg-primary/10 text-primary font-medium">{displayName?.[0] || 'U'}</AvatarFallback>
           </Avatar>
           
           <div className="flex flex-col">
@@ -278,6 +344,21 @@ export function ChatWindow({ chatId }: { chatId: number }) {
               <DropdownMenuItem onClick={() => handleClearHistoryForAll()}>
                 Clear history for everyone
               </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {!chat?.isGroup && otherMember && (
+                <DropdownMenuItem
+                  onClick={() => {
+                    if (blockStatus?.blocked) {
+                      handleUnblockUser();
+                    } else {
+                      handleBlockUser();
+                    }
+                  }}
+                  className={blockStatus?.blocked ? undefined : 'text-destructive'}
+                >
+                  {blockStatus?.blocked ? 'Unblock user' : 'Block user'}
+                </DropdownMenuItem>
+              )}
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => handleDeleteChat()} className="text-destructive">
                 <Trash2 className="w-4 h-4 mr-2" />
