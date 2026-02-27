@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { format, isToday, isYesterday } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, AlertCircle, CheckCircle2, Smile, Phone, Video } from "lucide-react";
+import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, AlertCircle, CheckCircle2, Smile, Phone, Video, Mic, StopCircle } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useChat, useBlockStatus, useBlockUser, useUnblockUser } from "@/hooks/use-chats";
 import { useMessages, useSendMessage, useMarkMessagesRead, useDeleteMessages } from "@/hooks/use-messages";
@@ -29,6 +29,13 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const [uploading, setUploading] = useState(false);
   const [showStickerPicker, setShowStickerPicker] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(0);
+
+  // recording state
+  const [recording, setRecording] = useState(false);
+  const [recordTime, setRecordTime] = useState(0); // ms
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const recordTimerRef = useRef<number | null>(null);
 
   // emoji categories explicitly grouped
   const EMOJI_CATEGORIES: { title: string; items: string[] }[] = [
@@ -268,6 +275,18 @@ export function ChatWindow({ chatId }: { chatId: number }) {
     }
   }, [messages?.length, chatId]);
 
+  // cleanup recorder if component unmounts
+  useEffect(() => {
+    return () => {
+      if (mediaRecorderRef.current) {
+        mediaRecorderRef.current.stop();
+      }
+      if (recordTimerRef.current) {
+        clearInterval(recordTimerRef.current);
+      }
+    };
+  }, []);
+
   const handleSend = (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!inputValue.trim() && attachments.length === 0) return;
@@ -311,6 +330,84 @@ export function ChatWindow({ chatId }: { chatId: number }) {
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      recordedChunksRef.current = [];
+
+      recorder.ondataavailable = (ev: BlobEvent) => {
+        if (ev.data && ev.data.size > 0) {
+          recordedChunksRef.current.push(ev.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        // stop timer
+        if (recordTimerRef.current) {
+          clearInterval(recordTimerRef.current);
+          recordTimerRef.current = null;
+        }
+        setRecording(false);
+        setRecordTime(0);
+
+        // stop the stream tracks so microphone is released
+        stream.getTracks().forEach(t => t.stop());
+
+        const blob = new Blob(recordedChunksRef.current, { type: recordedChunksRef.current[0]?.type || 'audio/webm' });
+        if (blob.size === 0) return;
+
+        // create file and upload
+        const file = new File([blob], `voice-${Date.now()}.webm`, { type: blob.type });
+        await uploadAndSendAudio(file);
+      };
+
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setRecording(true);
+      // simple timer
+      const start = Date.now();
+      recordTimerRef.current = window.setInterval(() => {
+        setRecordTime(Date.now() - start);
+      }, 250);
+    } catch (err) {
+      console.error("Recording failed", err);
+      alert("Unable to access microphone");
+    }
+  };
+
+  const stopRecording = () => {
+    mediaRecorderRef.current?.stop();
+    mediaRecorderRef.current = null;
+  };
+
+  const formatRecordTime = (ms: number) => {
+    const totalSec = Math.floor(ms / 1000);
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const uploadAndSendAudio = async (file: File) => {
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('/api/upload', { method: 'POST', body: formData });
+      if (!response.ok) throw new Error('Upload failed');
+      const data = await response.json();
+      const attachment = { name: data.name, url: data.url, type: data.type };
+      // send message immediately
+      sendMessage.mutate({ chatId, content: '', attachments: [attachment] });
+    } catch (err) {
+      console.error('Upload error:', err);
+      alert('Failed to upload audio');
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -762,6 +859,24 @@ export function ChatWindow({ chatId }: { chatId: number }) {
               )}
             </div>
 
+            {/* Record audio button */}
+            <button
+              type="button"
+              onClick={() => { recording ? stopRecording() : startRecording(); }}
+              disabled={uploading}
+              className="h-12 w-12 rounded-full shrink-0 flex items-center justify-center bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors disabled:opacity-50 relative"
+              title={recording ? 'Stop recording' : 'Record voice message'}
+            >
+              {recording ? (
+                <StopCircle className="w-5 h-5 text-red-500" />
+              ) : (
+                <Mic className="w-5 h-5" />
+              )}
+              {recording && (
+                <span className="absolute -top-1 -right-1 bg-red-500 rounded-full w-2 h-2 animate-pulse" />
+              )}
+            </button>
+
             {/* File upload button */}
             <button
               type="button"
@@ -778,7 +893,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
               multiple
               onChange={handleFileSelect}
               className="hidden"
-              accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx"
+              accept="image/*,video/*,audio/*,audio/webm,.pdf,.doc,.docx,.xls,.xlsx"
             />
 
             <Button
@@ -789,6 +904,11 @@ export function ChatWindow({ chatId }: { chatId: number }) {
             >
               {sendMessage.isPending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5 ml-0.5" />}
             </Button>
+            {recording && (
+              <div className="absolute bottom-full mb-1 text-xs text-red-500">
+                {formatRecordTime(recordTime)}
+              </div>
+            )}
           </div>
         </form>
       </div>

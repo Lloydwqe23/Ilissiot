@@ -44,6 +44,7 @@ const upload = multer({
       "audio/flac",
       "audio/aac",
       "audio/mp4",
+      "audio/webm",
       "application/pdf",
       "application/msword",
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
