@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo, ReactNode } from "react";
 import { format, isToday, isYesterday } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, AlertCircle, CheckCircle2, Smile, Phone, Video, Mic, StopCircle } from "lucide-react";
+import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, AlertCircle, CheckCircle2, Smile, Phone, Video, Mic, StopCircle, Ban } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useChat, useBlockStatus, useBlockUser, useUnblockUser } from "@/hooks/use-chats";
 import { useMessages, useSendMessage, useMarkMessagesRead, useDeleteMessages } from "@/hooks/use-messages";
@@ -12,6 +12,28 @@ import { Button } from "@/components/ui/button";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useLocation } from "wouter";
+
+/** Turn URLs in text into clickable <a> elements. */
+function linkifyText(text: string): ReactNode[] {
+  const urlRegex = /(https?:\/\/[^\s<>"']+)/gi;
+  const parts = text.split(urlRegex);
+  return parts.map((part, i) =>
+    urlRegex.test(part) ? (
+      <a
+        key={i}
+        href={part}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="underline break-all hover:opacity-80"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {part}
+      </a>
+    ) : (
+      <span key={i}>{part}</span>
+    )
+  );
+}
 
 export function ChatWindow({ chatId }: { chatId: number }) {
   const { user } = useAuth();
@@ -483,9 +505,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const handleBlockUser = async () => {
     if (!otherMember) return;
     if (confirm('Are you sure you want to block this user?')) {
-      blockMut.mutate(otherMember.userId, {
-        onSuccess: () => { alert('User blocked'); navigate('/'); }
-      });
+      blockMut.mutate(otherMember.userId);
     }
   };
 
@@ -601,8 +621,8 @@ export function ChatWindow({ chatId }: { chatId: number }) {
             </div>
 
             <div className="flex items-center gap-1">
-              {/* Call buttons (direct chats only) */}
-              {!chat?.isGroup && otherMember && (
+              {/* Call buttons (direct chats only, hidden when blocked) */}
+              {!chat?.isGroup && otherMember && !blockStatus?.blocked && !blockStatus?.blockedBy && (
                 <>
                   <Button
                     variant="ghost"
@@ -745,7 +765,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                             </div>
                           );
                         }
-                        return <p className="text-[15px] leading-relaxed break-words">{msg.content}</p>;
+                        return <p className="text-[15px] leading-relaxed break-words">{linkifyText(msg.content)}</p>;
                       })()}
 
                       {/* Attachments */}
@@ -773,6 +793,17 @@ export function ChatWindow({ chatId }: { chatId: number }) {
 
       {/* Input Area */}
       <div className="p-4 bg-background/80 backdrop-blur-md border-t border-border/50 shrink-0">
+        {blockStatus?.blockedBy ? (
+          <div className="max-w-4xl mx-auto flex items-center justify-center gap-2 py-3 text-muted-foreground">
+            <Ban className="w-5 h-5 text-destructive/70" />
+            <span className="text-sm">You have been blocked by this user.</span>
+          </div>
+        ) : blockStatus?.blocked ? (
+          <div className="max-w-4xl mx-auto flex items-center justify-center gap-2 py-3 text-muted-foreground">
+            <Ban className="w-5 h-5 text-destructive/70" />
+            <span className="text-sm">You blocked this user. Unblock to send messages.</span>
+          </div>
+        ) : (
         <form onSubmit={handleSend} className="max-w-4xl mx-auto space-y-2">
           {/* Attachments preview */}
           {attachments.length > 0 && (
@@ -911,6 +942,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
             )}
           </div>
         </form>
+        )}
       </div>
     </div>
   );

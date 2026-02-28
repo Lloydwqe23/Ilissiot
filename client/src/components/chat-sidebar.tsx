@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Link, useRoute } from "wouter";
+import { Link, useRoute, useLocation } from "wouter";
 import { format } from "date-fns";
-import { Edit, LogOut, Settings, MoreVertical, ArrowLeft } from "lucide-react";
+import { Edit, LogOut, Settings, MoreVertical, ArrowLeft, Image, Mic, Video, Phone, FileText, Sticker } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useChats, useDeleteChat, useBlockUser, useUnblockUser, useBlockStatus } from "@/hooks/use-chats";
 import { useUserStatus } from "@/hooks/use-user-status";
@@ -13,6 +13,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { ProfileSettings } from "./profile-settings";
 import { UserSearch } from "./user-search";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -56,9 +57,12 @@ function ChatSidebarItem({
   const blockStatus = useBlockStatus(otherUserId);
   const blockMutation = useBlockUser();
   const unblockMutation = useUnblockUser();
+  const [, navigate] = useLocation();
 
   return (
     <SidebarMenuItem key={chat.id} className="mb-1 relative group">
+      <ContextMenu>
+      <ContextMenuTrigger asChild>
       <Link
         href={`/chat/${chat.id}`}
         onClick={closeMobileSidebar}
@@ -90,8 +94,31 @@ function ChatSidebarItem({
             )}
           </div>
           <div className="flex justify-between items-center">
-            <span className="text-[13px] truncate text-sidebar-foreground/60 group-hover:text-sidebar-foreground/80">
-              {lastMsg ? (lastMsg.senderId === user?.id ? `You: ${lastMsg.content}` : lastMsg.content) : 'Started a chat'}
+            <span className="text-[13px] truncate text-sidebar-foreground/60 group-hover:text-sidebar-foreground/80 flex items-center gap-1">
+              {lastMsg ? (() => {
+                const prefix = lastMsg.senderId === user?.id ? 'You: ' : '';
+                const attachments: any[] = lastMsg.attachments || [];
+                if (attachments.length > 0) {
+                  const first = attachments[0];
+                  if (first.type === 'sticker') {
+                    return <>{prefix}<Sticker className="w-3.5 h-3.5 inline" /> Sticker</>;
+                  }
+                  if (first.type?.startsWith('call/')) {
+                    return <>{prefix}<Phone className="w-3.5 h-3.5 inline" /> Call</>;
+                  }
+                  if (first.type?.startsWith('image/')) {
+                    return <>{prefix}<Image className="w-3.5 h-3.5 inline" /> Photo</>;
+                  }
+                  if (first.type?.startsWith('video/')) {
+                    return <>{prefix}<Video className="w-3.5 h-3.5 inline" /> Video</>;
+                  }
+                  if (first.type?.startsWith('audio/')) {
+                    return <>{prefix}<Mic className="w-3.5 h-3.5 inline" /> Audio</>;
+                  }
+                  return <>{prefix}<FileText className="w-3.5 h-3.5 inline" /> {first.name || 'File'}</>;
+                }
+                return `${prefix}${lastMsg.content}`;
+              })() : 'Started a chat'}
             </span>
             {chat.unreadCount ? (
               <span className={`min-w-5 h-5 px-1.5 rounded-full flex items-center justify-center text-[10px] font-bold ml-2 ${'bg-primary text-primary-foreground'}`}>
@@ -101,49 +128,44 @@ function ChatSidebarItem({
             </div>
           </div>
         </Link>
-
-      {/* actions menu visible on hover */}
-      <div className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-6 w-6">
-              <MoreVertical className="w-4 h-4 text-sidebar-foreground/60" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuLabel>Chat</DropdownMenuLabel>
-            <DropdownMenuItem
-              onClick={() => {
-                if (confirm('Delete this chat? This cannot be undone.')) {
-                  deleteChatMutation.mutate(chat.id);
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuLabel>Chat</ContextMenuLabel>
+        <ContextMenuItem
+          onClick={() => {
+            if (confirm('Delete this chat? This cannot be undone.')) {
+              deleteChatMutation.mutate(chat.id, {
+                onSuccess: () => {
+                  if (isActive) navigate('/');
                 }
-              }}
-              className="text-destructive"
-            >
-              Delete
-            </DropdownMenuItem>
-            {otherUserId && (
-              <>
-                <DropdownMenuSeparator />
-                {blockStatus.data?.blocked ? (
-                  <DropdownMenuItem
-                    onClick={() => unblockMutation.mutate(otherUserId)}
-                  >
-                    Unblock user
-                  </DropdownMenuItem>
-                ) : (
-                  <DropdownMenuItem
-                    onClick={() => blockMutation.mutate(otherUserId)}
-                    className="text-destructive"
-                  >
-                    Block user
-                  </DropdownMenuItem>
-                )}
-              </>
+              });
+            }
+          }}
+          className="text-destructive"
+        >
+          Delete
+        </ContextMenuItem>
+        {otherUserId && (
+          <>
+            <ContextMenuSeparator />
+            {blockStatus.data?.blocked ? (
+              <ContextMenuItem
+                onClick={() => unblockMutation.mutate(otherUserId)}
+              >
+                Unblock user
+              </ContextMenuItem>
+            ) : (
+              <ContextMenuItem
+                onClick={() => blockMutation.mutate(otherUserId)}
+                className="text-destructive"
+              >
+                Block user
+              </ContextMenuItem>
             )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+          </>
+        )}
+      </ContextMenuContent>
+      </ContextMenu>
     </SidebarMenuItem>
   );
 }

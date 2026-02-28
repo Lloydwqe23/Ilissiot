@@ -1,5 +1,7 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useTheme } from "next-themes";
+import Cropper from "react-easy-crop";
+import type { Area } from "react-easy-crop";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +13,7 @@ import { useUpdateProfile } from "@/hooks/use-users";
 import { useToast } from "@/hooks/use-toast";
 import { useBlockedUsers, useUnblockUser } from "@/hooks/use-chats";
 import { Loader2, Camera, Trash2, X } from "lucide-react";
+import { Slider } from "@/components/ui/slider";
 
 export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const { user } = useAuth();
@@ -23,6 +26,11 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
   const [bio, setBio] = useState(user?.bio || "");
   const [profileImageUrl, setProfileImageUrl] = useState(user?.profileImageUrl || "");
   const [uploadingImage, setUploadingImage] = useState(false);
+  // Crop state
+  const [cropImageSrc, setCropImageSrc] = useState<string | null>(null);
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
   const defaultTheme = user?.theme === 'dark' ? 'dark' : 'light';
   const [theme, setTheme] = useState<'light' | 'dark'>(defaultTheme);
   const { setTheme: applyTheme } = useTheme();
@@ -59,10 +67,51 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
       return;
     }
 
+    // Read the file and open the crop dialog
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCropImageSrc(reader.result as string);
+      setCrop({ x: 0, y: 0 });
+      setZoom(1);
+    };
+    reader.readAsDataURL(file);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const onCropComplete = useCallback((_: Area, croppedPixels: Area) => {
+    setCroppedAreaPixels(croppedPixels);
+  }, []);
+
+  const getCroppedBlob = async (): Promise<Blob> => {
+    const image = new Image();
+    image.src = cropImageSrc!;
+    await new Promise((resolve) => { image.onload = resolve; });
+
+    const canvas = document.createElement("canvas");
+    const size = 512; // output size
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d")!;
+
+    const { x, y, width, height } = croppedAreaPixels!;
+    ctx.drawImage(image, x, y, width, height, 0, 0, size, size);
+
+    return new Promise((resolve) => {
+      canvas.toBlob((blob) => resolve(blob!), "image/jpeg", 0.9);
+    });
+  };
+
+  const handleCropConfirm = async () => {
+    if (!croppedAreaPixels || !cropImageSrc) return;
+
     setUploadingImage(true);
     try {
+      const blob = await getCroppedBlob();
       const formData = new FormData();
-      formData.append("file", file);
+      formData.append("file", blob, "profile.jpg");
 
       const response = await fetch("/api/upload", {
         method: "POST",
@@ -80,10 +129,12 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
       toast({ title: "Failed to upload image", variant: "destructive" });
     } finally {
       setUploadingImage(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
+      setCropImageSrc(null);
     }
+  };
+
+  const handleCropCancel = () => {
+    setCropImageSrc(null);
   };
 
   const handleRemoveImage = () => {
@@ -115,6 +166,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
   const initials = `${firstName?.[0] || ''}${lastName?.[0] || ''}`.toUpperCase() || 'U';
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[425px] rounded-2xl p-0 overflow-hidden border-border/50 shadow-2xl">
         <DialogHeader className="p-6 bg-muted/30 border-b border-border/50">
@@ -332,5 +384,53 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* Image Crop Dialog */}
+    <Dialog open={!!cropImageSrc} onOpenChange={(open) => { if (!open) handleCropCancel(); }}>
+      <DialogContent className="sm:max-w-[450px] rounded-2xl p-0 overflow-hidden border-border/50 shadow-2xl">
+        <DialogHeader className="p-4 border-b border-border/50">
+          <DialogTitle>Crop profile image</DialogTitle>
+        </DialogHeader>
+        <div className="relative w-full" style={{ height: 320 }}>
+          {cropImageSrc && (
+            <Cropper
+              image={cropImageSrc}
+              crop={crop}
+              zoom={zoom}
+              aspect={1}
+              cropShape="round"
+              showGrid={false}
+              onCropChange={setCrop}
+              onZoomChange={setZoom}
+              onCropComplete={onCropComplete}
+            />
+          )}
+        </div>
+        <div className="px-6 py-3">
+          <Label className="text-xs text-muted-foreground mb-1 block">Zoom</Label>
+          <Slider
+            min={1}
+            max={3}
+            step={0.05}
+            value={[zoom]}
+            onValueChange={([v]) => setZoom(v)}
+          />
+        </div>
+        <div className="p-4 pt-0 flex justify-end gap-3">
+          <Button variant="ghost" className="rounded-xl" onClick={handleCropCancel}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleCropConfirm}
+            disabled={uploadingImage}
+            className="rounded-xl"
+          >
+            {uploadingImage && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Apply
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  </>
   );
 }

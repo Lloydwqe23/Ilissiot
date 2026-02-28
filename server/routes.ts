@@ -93,6 +93,18 @@ export async function registerRoutes(
           // Forward the signaling message to the target user
           const payload = message.payload as { targetUserId: string; [key: string]: any };
           if (payload.targetUserId && currentUserId) {
+            // Block check for call offers – reject if either user blocked the other
+            if (message.type === WS_EVENTS.CALL_OFFER) {
+              const blockStatus = await storage.getBlockStatus(currentUserId, payload.targetUserId);
+              if (blockStatus.blocked || blockStatus.blockedBy) {
+                // Send a reject back to the caller
+                sendToUser(currentUserId, {
+                  type: WS_EVENTS.CALL_REJECT,
+                  payload: { fromUserId: payload.targetUserId }
+                });
+                return;
+              }
+            }
             sendToUser(payload.targetUserId, {
               type: message.type,
               payload: { ...payload, fromUserId: currentUserId }
@@ -316,6 +328,20 @@ export async function registerRoutes(
         return res.status(401).json({ message: "Unauthorized" });
       }
 
+      // Block check: in 1-on-1 chats, prevent messaging if either user blocked the other
+      if (!chat.isGroup) {
+        const otherMember = chat.members.find(m => m.userId !== userId);
+        if (otherMember?.userId) {
+          const status = await storage.getBlockStatus(userId, otherMember.userId);
+          if (status.blocked) {
+            return res.status(403).json({ message: "You have blocked this user. Unblock them to send messages." });
+          }
+          if (status.blockedBy) {
+            return res.status(403).json({ message: "You have been blocked by this user." });
+          }
+        }
+      }
+
       const message = await storage.createMessage({
         chatId,
         senderId: userId,
@@ -441,7 +467,7 @@ export async function registerRoutes(
         return res.status(401).json({ message: "Unauthorized" });
       }
 
-      await storage.deleteChat(chatId);
+      await storage.leaveChatForUser(chatId, userId);
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ message: "Internal server error" });

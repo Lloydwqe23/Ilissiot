@@ -27,6 +27,7 @@ export interface IStorage {
   getChat(id: number): Promise<ChatWithMembers | undefined>;
   createDirectChat(userId1: string, userId2: string): Promise<ChatWithMembers>;
   deleteChat(chatId: number): Promise<void>;
+  leaveChatForUser(chatId: number, userId: string): Promise<void>;
   
   // Message operations
   getMessagesForChat(chatId: number, userId: string, limit?: number): Promise<MessageWithSender[]>;
@@ -178,25 +179,18 @@ export class DatabaseStorage implements IStorage {
       });
     }
 
-    // filter out direct chats where either user has blocked the other
-    const filtered: ChatWithMembers[] = [];
-    for (const chat of result) {
-      if (!chat.isGroup) {
-        const other = chat.members.find(m => m.userId !== userId);
-        if (other && other.userId) {
-          const blocked = await this.isBlocked(userId, other.userId);
-          const blockedBy = await this.isBlocked(other.userId, userId);
-          if (blocked || blockedBy) {
-            continue; // skip this chat entirely
-          }
-        }
-      }
-      filtered.push(chat);
-    }
+    // No longer filter out blocked chats – they should stay visible
+    // but the input area will show a "blocked" notice instead
+
+    // Filter out chats hidden by the current user
+    const visible = result.filter(chat => {
+      const hidden: string[] = (chat.hiddenBy as string[]) || [];
+      return !hidden.includes(userId);
+    });
 
     // Sort by last message date
     const uniqueChats = new Map<number, ChatWithMembers>();
-    filtered.forEach(chat => {
+    visible.forEach(chat => {
       if (!uniqueChats.has(chat.id)) {
         uniqueChats.set(chat.id, chat);
       }
@@ -327,10 +321,11 @@ export class DatabaseStorage implements IStorage {
       .values(messageData)
       .returning();
 
-    // Update the chat's updatedAt timestamp
+    // Update the chat's updatedAt timestamp and unhide for all users
+    // (a new message means the chat should reappear for everyone)
     await db
       .update(chats)
-      .set({ updatedAt: new Date() })
+      .set({ updatedAt: new Date(), hiddenBy: [] })
       .where(eq(chats.id, messageData.chatId as number));
 
     // Fetch the sender to return the full object
@@ -465,6 +460,20 @@ export class DatabaseStorage implements IStorage {
     // Delete the chat
     await db
       .delete(chats)
+      .where(eq(chats.id, chatId));
+  }
+
+  async leaveChatForUser(chatId: number, userId: string): Promise<void> {
+    // Add userId to the chat's hiddenBy array so it disappears only for this user
+    const chat = await this.getChat(chatId);
+    if (!chat) return;
+    const hiddenBy: string[] = (chat.hiddenBy as string[]) || [];
+    if (!hiddenBy.includes(userId)) {
+      hiddenBy.push(userId);
+    }
+    await db
+      .update(chats)
+      .set({ hiddenBy })
       .where(eq(chats.id, chatId));
   }
 }

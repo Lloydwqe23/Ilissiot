@@ -40,6 +40,7 @@ export const chats = pgTable("chats", {
   isGroup: boolean("is_group").default(false),
   name: text("name"), // Only for group chats
   avatarUrl: text("avatar_url"), // Only for group chats
+  hiddenBy: jsonb("hidden_by").default(sql`'[]'::jsonb`), // Array of userIds who "deleted" this chat for themselves
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });

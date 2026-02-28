@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Phone, PhoneOff, Mic, MicOff, Video, VideoOff, Share2 } from 'lucide-react';
+import { Phone, PhoneOff, Mic, MicOff, Video, VideoOff, MonitorUp, MonitorOff } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -51,6 +51,14 @@ export function CallOverlay() {
   const [localAudioLevel, setLocalAudioLevel] = useState(0);
   const [remoteAudioLevel, setRemoteAudioLevel] = useState(0);
 
+  // ── Computed display values ──────────────────────────────────────
+  const isVideo = call.type === 'video';
+  const hasRemoteVideo = !!call.remoteStream?.getVideoTracks().length;
+  const hasLocalVideo = !!call.localStream?.getVideoTracks().length;
+  const showRemoteVideo = hasRemoteVideo || isVideo;
+  const showLocalVideo = hasLocalVideo;
+  const participantName = call.participant?.name || 'Unknown';
+
   // ── Timer ────────────────────────────────────────────────────────
   useEffect(() => {
     if (call.state !== 'connected' || !call.startTime) return;
@@ -66,7 +74,7 @@ export function CallOverlay() {
       localVideoRef.current.srcObject = call.localStream;
       localVideoRef.current.play().catch(() => {});
     }
-  }, [call.localStream, call.state]);
+  }, [call.localStream, call.state, showLocalVideo]);
 
   // ── Attach remote video ──────────────────────────────────────────
   useEffect(() => {
@@ -74,7 +82,7 @@ export function CallOverlay() {
       remoteVideoRef.current.srcObject = call.remoteStream;
       remoteVideoRef.current.play().catch(() => {});
     }
-  }, [call.remoteStream, call.state]);
+  }, [call.remoteStream, call.state, showRemoteVideo]);
 
   // ── Attach remote audio (always, even for video calls) ──────────
   // This hidden <audio> element ensures remote audio is always played
@@ -149,13 +157,6 @@ export function CallOverlay() {
     }
   }, [call.endReason]);
 
-  const isVideo = call.type === 'video';
-  const hasRemoteVideo = !!call.remoteStream?.getVideoTracks().length;
-  const hasLocalVideo = !!call.localStream?.getVideoTracks().length;
-  const showRemoteVideo = hasRemoteVideo || isVideo;
-  const showLocalVideo = hasLocalVideo;
-  const participantName = call.participant?.name || 'Unknown';
-
   return (
     <>
       {/* ── End-of-call toast ──────────────────────────────────────── */}
@@ -189,7 +190,7 @@ export function CallOverlay() {
                   ref={remoteVideoRef}
                   autoPlay
                   playsInline
-                  className="absolute inset-0 w-full h-full object-cover"
+                  className="absolute inset-0 w-full h-full object-contain bg-black"
                 />
                 {/* Local video / screen share preview (picture-in-picture) */}
                 {showLocalVideo && (
@@ -209,7 +210,7 @@ export function CallOverlay() {
 
             {/* ── Center content (avatar, name, status) ── */}
             <div className="relative z-10 flex-1 flex flex-col items-center justify-center text-white px-6">
-              {(!isVideo || call.state !== 'connected') && (
+              {((!isVideo && !hasRemoteVideo) || call.state !== 'connected') && (
                 <motion.div
                   initial={{ scale: 0.8, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
@@ -265,7 +266,7 @@ export function CallOverlay() {
             {/* ── Bottom controls bar ── */}
             <div className="relative z-10 pb-10 pt-4 flex flex-col items-center gap-3">
               {/* Timer for video calls */}
-              {isVideo && call.state === 'connected' && (
+              {(isVideo || hasRemoteVideo) && call.state === 'connected' && (
                 <div className="bg-black/40 backdrop-blur-sm rounded-full px-4 py-1.5 text-sm font-mono text-white">
                   {formatDuration(elapsed)}
                 </div>
@@ -344,10 +345,10 @@ export function CallOverlay() {
                         size="lg"
                         title={call.isSharingScreen ? 'Stop sharing screen' : 'Share screen'}
                         className={`w-14 h-14 rounded-full transition-colors ${
-                          call.isSharingScreen ? 'bg-red-500 text-white' : 'bg-white/10 text-white hover:bg-white/20'
+                          call.isSharingScreen ? 'bg-green-500 text-white hover:bg-green-600' : 'bg-white/10 text-white hover:bg-white/20'
                         }`}
                       >
-                        {call.isSharingScreen ? <VideoOff className="w-6 h-6" /> : <Share2 className="w-6 h-6" />}
+                        {call.isSharingScreen ? <MonitorOff className="w-6 h-6" /> : <MonitorUp className="w-6 h-6" />}
                       </Button>
                     )}
 

@@ -390,10 +390,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
     if (!pcRef.current) return;
     try {
       await pcRef.current.setRemoteDescription(new RTCSessionDescription(payload.sdp));
-      setState('connected');
-      const now = Date.now();
-      setStartTime(now);
-      startTimeRef.current = now;
+      // Only set connected state & timer on the initial answer, not renegotiations
+      if (!startTimeRef.current) {
+        setState('connected');
+        const now = Date.now();
+        setStartTime(now);
+        startTimeRef.current = now;
+      }
     } catch (err) {
       console.error('[Call] Failed to set remote description:', err);
     }
@@ -461,8 +464,20 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const screenTrack = screenStream.getTracks()[0];
     screenTrack.stop();
 
-    if (type === 'video' && cameraStreamRef.current) {
-      // restore camera track as sender
+    const wasAudio = prevTypeRef.current === 'audio';
+
+    if (wasAudio) {
+      // was originally audio-only — remove the video track entirely
+      pc.removeTrack(sender);
+      // restore original audio stream as local preview
+      if (cameraStreamRef.current) {
+        setLocalStream(cameraStreamRef.current);
+      }
+      // revert call type
+      setType('audio');
+      prevTypeRef.current = null;
+    } else if (type === 'video' && cameraStreamRef.current) {
+      // was originally a video call — restore camera track
       const camTrack = cameraStreamRef.current.getVideoTracks()[0];
       if (camTrack) {
         sender.replaceTrack(camTrack).catch(() => {});
