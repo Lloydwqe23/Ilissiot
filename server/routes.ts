@@ -72,7 +72,8 @@ export async function registerRoutes(
           if (chat && currentUserId) {
             chat.members.forEach(member => {
               if (member.userId !== currentUserId) {
-                sendToUser(member.userId, {
+                // userId should always be set for chat members
+                sendToUser(member.userId!, {
                   type: message.type,
                   payload: { chatId: payload.chatId, userId: currentUserId }
                 });
@@ -325,7 +326,7 @@ export async function registerRoutes(
       // Broadcast to other chat members via WS
       chat.members.forEach(member => {
         if (member.userId !== userId) {
-          sendToUser(member.userId, {
+          sendToUser(member.userId!, {
             type: WS_EVENTS.MESSAGE_NEW,
             payload: message
           });

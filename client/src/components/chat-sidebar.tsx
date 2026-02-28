@@ -175,7 +175,7 @@ export function ChatSidebar() {
               </Button>
             )}
             <img 
-              src="/favicon.svg" 
+              src="/favicon.png" 
               alt="Ilissiot" 
               className="w-8 h-8 rounded-lg shadow-sm"
             />

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Phone, PhoneOff, Mic, MicOff, Video, VideoOff } from 'lucide-react';
+import { Phone, PhoneOff, Mic, MicOff, Video, VideoOff, Share2 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -150,6 +150,10 @@ export function CallOverlay() {
   }, [call.endReason]);
 
   const isVideo = call.type === 'video';
+  const hasRemoteVideo = !!call.remoteStream?.getVideoTracks().length;
+  const hasLocalVideo = !!call.localStream?.getVideoTracks().length;
+  const showRemoteVideo = hasRemoteVideo || isVideo;
+  const showLocalVideo = hasLocalVideo;
   const participantName = call.participant?.name || 'Unknown';
 
   return (
@@ -177,8 +181,8 @@ export function CallOverlay() {
             {/* Backdrop */}
             <div className="absolute inset-0 bg-black/85 backdrop-blur-lg" />
 
-            {/* Video area (video calls only, connected) */}
-            {isVideo && call.state === 'connected' && (
+            {/* Video area (show whenever we have any remote video track) */}
+            {showRemoteVideo && call.state === 'connected' && (
               <>
                 {/* Remote video (full screen) */}
                 <video
@@ -187,17 +191,19 @@ export function CallOverlay() {
                   playsInline
                   className="absolute inset-0 w-full h-full object-cover"
                 />
-                {/* Local video (picture-in-picture) */}
-                <div className="absolute top-6 right-6 w-40 h-28 md:w-52 md:h-36 rounded-2xl overflow-hidden border-2 border-white/30 shadow-2xl z-10 bg-black">
-                  <video
-                    ref={localVideoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    className="w-full h-full object-cover"
-                    style={{ transform: 'scaleX(-1)' }}
-                  />
-                </div>
+                {/* Local video / screen share preview (picture-in-picture) */}
+                {showLocalVideo && (
+                  <div className="absolute top-6 right-6 w-40 h-28 md:w-52 md:h-36 rounded-2xl overflow-hidden border-2 border-white/30 shadow-2xl z-10 bg-black">
+                    <video
+                      ref={localVideoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="w-full h-full object-cover"
+                      style={{ transform: call.isSharingScreen ? '' : 'scaleX(-1)' }}
+                    />
+                  </div>
+                )}
               </>
             )}
 
@@ -328,6 +334,20 @@ export function CallOverlay() {
                         }`}
                       >
                         {call.isVideoOff ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />}
+                      </Button>
+                    )}
+
+                    {/* screen share button */}
+                    {call.state === 'connected' && (
+                      <Button
+                        onClick={call.isSharingScreen ? call.stopScreenShare : call.startScreenShare}
+                        size="lg"
+                        title={call.isSharingScreen ? 'Stop sharing screen' : 'Share screen'}
+                        className={`w-14 h-14 rounded-full transition-colors ${
+                          call.isSharingScreen ? 'bg-red-500 text-white' : 'bg-white/10 text-white hover:bg-white/20'
+                        }`}
+                      >
+                        {call.isSharingScreen ? <VideoOff className="w-6 h-6" /> : <Share2 className="w-6 h-6" />}
                       </Button>
                     )}
 

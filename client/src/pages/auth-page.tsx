@@ -101,7 +101,7 @@ export function AuthPage() {
         <div className="relative z-10">
           <div className="flex items-center gap-3 mb-16">
             <img 
-              src="/favicon.svg" 
+              src="/favicon.png" 
               alt="Ilissiot" 
               className="w-12 h-12 rounded-xl"
             />

@@ -149,6 +149,8 @@ export const WS_EVENTS = {
 } as const;
 
 export interface WsMessage<T = unknown> {
-  type: keyof typeof WS_EVENTS;
+  // the actual string value sent over the wire (e.g. 'connect', 'message:new',
+  // 'call:offer', etc.)
+  type: (typeof WS_EVENTS)[keyof typeof WS_EVENTS];
   payload: T;
 }

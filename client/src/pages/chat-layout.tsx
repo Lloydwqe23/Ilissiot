@@ -56,7 +56,7 @@ export function ChatLayout() {
                 className="text-center space-y-4"
               >
                 <img 
-                  src="/favicon.svg" 
+                  src="/favicon.png" 
                   alt="Ilissiot" 
                   className="w-20 h-20 rounded-2xl shadow-sm border border-border mx-auto"
                 />

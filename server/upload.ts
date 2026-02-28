@@ -1,3 +1,5 @@
+// multer has no types in this project
+// @ts-ignore
 import multer from "multer";
 import path from "path";
 import { existsSync, mkdirSync } from "fs";
@@ -12,10 +14,10 @@ if (!existsSync(uploadDir)) {
 }
 
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
+  destination: (req: any, file: any, cb: any) => {
     cb(null, uploadDir);
   },
-  filename: (req, file, cb) => {
+  filename: (req: any, file: any, cb: any) => {
     // Decode filename from latin1 to utf-8 (multer quirk with non-ASCII names)
     const originalName = Buffer.from(file.originalname, 'latin1').toString('utf-8');
     const timestamp = Date.now();
@@ -29,7 +31,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
-  fileFilter: (req, file, cb) => {
+  fileFilter: (req: any, file: any, cb: any) => {
     // Allow common media and document types
     const allowedMimes = [
       "image/jpeg",

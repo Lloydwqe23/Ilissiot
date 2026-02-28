@@ -5,7 +5,6 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useSearchUsers } from "@/hooks/use-users";
 import { useCreateDirectChat } from "@/hooks/use-chats";
 import { useToast } from "@/hooks/use-toast";
-import { useDebounce } from "@/hooks/use-debounce";
 import { Search, Loader2, UserPlus, MessageSquarePlus } from "lucide-react";
 import { useLocation } from "wouter";
 

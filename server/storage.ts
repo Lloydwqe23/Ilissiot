@@ -363,8 +363,8 @@ export class DatabaseStorage implements IStorage {
       );
   }
 
-  // return number of rows that were marked deleted for this user
-  async clearMessagesForUser(chatId: number, userId: string): Promise<number> {
+  // return nothing (previously returned count)
+  async clearMessagesForUser(chatId: number, userId: string): Promise<void> {
     // retrieve ids first so we know what to update
     const allMessages = await db
       .select({ id: messages.id, deletedBy: messages.deletedBy })
@@ -388,7 +388,8 @@ export class DatabaseStorage implements IStorage {
         count++;
       }
     }
-    return count;
+    // ignore count
+    void count;
   }
 
   // Helper that will either hard-delete or mark as deleted for a specific user depending on

@@ -23,7 +23,8 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
   const [bio, setBio] = useState(user?.bio || "");
   const [profileImageUrl, setProfileImageUrl] = useState(user?.profileImageUrl || "");
   const [uploadingImage, setUploadingImage] = useState(false);
-  const [theme, setTheme] = useState<'light' | 'dark'>(user?.theme || 'light');
+  const defaultTheme = user?.theme === 'dark' ? 'dark' : 'light';
+  const [theme, setTheme] = useState<'light' | 'dark'>(defaultTheme);
   const { setTheme: applyTheme } = useTheme();
 
   // blocked users list view state
@@ -38,7 +39,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
       setLastName(user.lastName || "");
       setBio(user.bio || "");
       setProfileImageUrl(user.profileImageUrl || "");
-      setTheme(user.theme || 'light');
+      setTheme(user.theme === 'dark' ? 'dark' : 'light');
     }
   }, [open, user]);
 

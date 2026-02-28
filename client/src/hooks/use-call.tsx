@@ -23,6 +23,8 @@ interface CallContextValue {
   startTime: number | null;
   isMuted: boolean;
   isVideoOff: boolean;
+  /** currently sharing screen/video? */
+  isSharingScreen: boolean;
   endReason: CallEndReason;
   /** Duration of the last finished call in ms (for call history) */
   lastCallDuration: number | null;
@@ -41,6 +43,10 @@ interface CallContextValue {
   hangup: () => void;
   toggleMute: () => void;
   toggleVideo: () => void;
+  /** Begin sharing the screen/video contents */
+  startScreenShare: () => Promise<void>;
+  /** Stop sharing the screen */
+  stopScreenShare: () => void;
   handleAnswer: (payload: any) => void;
   handleIceCandidate: (payload: any) => void;
   handleRemoteHangup: () => void;
@@ -70,6 +76,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [startTime, setStartTime] = useState<number | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
+  // screen sharing state
+  const [isSharingScreen, setIsSharingScreen] = useState(false);
   const [endReason, setEndReason] = useState<CallEndReason>(null);
   const [lastCallDuration, setLastCallDuration] = useState<number | null>(null);
   const [lastChatId, setLastChatId] = useState<number | null>(null);
@@ -86,6 +94,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const startTimeRef = useRef<number | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  // Screen share helpers
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const screenStreamRef = useRef<MediaStream | null>(null);
+  const screenSenderRef = useRef<RTCRtpSender | null>(null);
+  // remember the type we were in before we started sharing so we can restore
+  const prevTypeRef = useRef<CallType | null>(null);
 
   const cleanupMedia = useCallback(() => {
     localStreamRef.current?.getTracks().forEach(t => t.stop());
@@ -115,6 +129,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     startTimeRef.current = null;
     setIsMuted(false);
     setIsVideoOff(false);
+    setIsSharingScreen(false);
     pendingOfferRef.current = null;
   }, []);
 
@@ -142,6 +157,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
       const track = event.track;
       if (!remote.getTrackById(track.id)) {
         remote.addTrack(track);
+        // if the track ends later (e.g. screen share stopped) remove it
+        track.onended = () => {
+          remote.removeTrack(track);
+          setRemoteTrackVersion(v => v + 1);
+          setRemoteStream(remote);
+        };
       }
       // Bump version to force re-render & re-wire audio/video elements
       setRemoteTrackVersion(v => v + 1);
@@ -166,6 +187,21 @@ export function CallProvider({ children }: { children: ReactNode }) {
         });
         cleanupMedia();
         resetState('error');
+      }
+    };
+
+    // When tracks are added/removed we may need to renegotiate
+    pc.onnegotiationneeded = async () => {
+      try {
+        if (!wsSendRef.current) return;
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        wsSendRef.current({
+          type: 'call:offer',
+          payload: { targetUserId, sdp: offer },
+        });
+      } catch (err) {
+        console.error('[Call] renegotiation failed:', err);
       }
     };
 
@@ -222,25 +258,43 @@ export function CallProvider({ children }: { children: ReactNode }) {
   }, [state, createPC]);
 
   // ── Handle incoming call offer ───────────────────────────────────
-  const handleIncomingOffer = useCallback((payload: any) => {
-    if (state !== 'idle') {
-      wsSendRef.current?.({
-        type: 'call:busy',
-        payload: { targetUserId: payload.fromUserId },
+  const handleIncomingOffer = useCallback(async (payload: any) => {
+    // If we're idle treat as new incoming call
+    if (state === 'idle') {
+      pendingOfferRef.current = payload.sdp;
+      setState('incoming');
+      setType(payload.callType || 'audio');
+      setChatId(payload.chatId);
+      setParticipant({
+        userId: payload.fromUserId,
+        name: payload.callerName || 'Unknown',
+        avatarUrl: payload.callerAvatar || null,
       });
+      setEndReason(null);
       return;
     }
 
-    pendingOfferRef.current = payload.sdp;
-    setState('incoming');
-    setType(payload.callType || 'audio');
-    setChatId(payload.chatId);
-    setParticipant({
-      userId: payload.fromUserId,
-      name: payload.callerName || 'Unknown',
-      avatarUrl: payload.callerAvatar || null,
+    // Already connected => this is a renegotiation offer (e.g. screen share)
+    if (state === 'connected' && pcRef.current) {
+      try {
+        await pcRef.current.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+        const answer = await pcRef.current.createAnswer();
+        await pcRef.current.setLocalDescription(answer);
+        wsSendRef.current?.({
+          type: 'call:answer',
+          payload: { targetUserId: payload.fromUserId, sdp: answer },
+        });
+      } catch (err) {
+        console.error('[Call] renegotiation failed', err);
+      }
+      return;
+    }
+
+    // otherwise busy
+    wsSendRef.current?.({
+      type: 'call:busy',
+      payload: { targetUserId: payload.fromUserId },
     });
-    setEndReason(null);
   }, [state]);
 
   // ── Accept the incoming call ─────────────────────────────────────
@@ -393,15 +447,89 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }
   }, [isVideoOff]);
 
+  // ── Start sharing the screen ─────────────────────────────────────
+  // ── Stop sharing the screen ──────────────────────────────────────
+  const stopScreenShare = useCallback(() => {
+    const pc = pcRef.current;
+    const sender = screenSenderRef.current;
+    const screenStream = screenStreamRef.current;
+    if (!pc || !sender || !screenStream) {
+      setIsSharingScreen(false);
+      return;
+    }
+
+    const screenTrack = screenStream.getTracks()[0];
+    screenTrack.stop();
+
+    if (type === 'video' && cameraStreamRef.current) {
+      // restore camera track as sender
+      const camTrack = cameraStreamRef.current.getVideoTracks()[0];
+      if (camTrack) {
+        sender.replaceTrack(camTrack).catch(() => {});
+        setLocalStream(cameraStreamRef.current);
+      } else {
+        pc.removeTrack(sender);
+      }
+    } else {
+      pc.removeTrack(sender);
+    }
+
+    setIsSharingScreen(false);
+    screenSenderRef.current = null;
+    screenStreamRef.current = null;
+  }, [type]);
+
+  // ── Start sharing the screen ─────────────────────────────────────
+  const startScreenShare = useCallback(async () => {
+    if (!pcRef.current) return;
+    try {
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      const screenTrack = screenStream.getVideoTracks()[0];
+      if (!screenTrack) return;
+
+      // keep a reference to allow stopping later
+      screenStreamRef.current = screenStream;
+      cameraStreamRef.current = localStreamRef.current;
+
+      const pc = pcRef.current;
+      // find existing video sender if any
+      let sender = pc.getSenders().find(s => s.track?.kind === 'video');
+      if (sender) {
+        // replace existing video with screen track
+        await sender.replaceTrack(screenTrack);
+        screenSenderRef.current = sender;
+      } else {
+        screenSenderRef.current = pc.addTrack(screenTrack, screenStream);
+      }
+
+      // if we were in audio mode, upgrade to video for history/UI
+      if (type === 'audio') {
+        prevTypeRef.current = type;
+        setType('video');
+      }
+      setIsSharingScreen(true);
+      // update local preview to the screen share stream
+      setLocalStream(screenStream);
+
+      screenTrack.onended = () => {
+        // user stopped sharing via browser UI
+        stopScreenShare();
+      };
+    } catch (err) {
+      console.error('[Call] Screen share failed', err);
+    }
+  }, [stopScreenShare]);
+
   const value: CallContextValue = {
     state, type, participant, chatId,
     localStream, remoteStream, startTime,
-    isMuted, isVideoOff, endReason, lastCallDuration, lastChatId, lastCallType, lastIsInitiator,
+    isMuted, isVideoOff, isSharingScreen, endReason, lastCallDuration, lastChatId, lastCallType, lastIsInitiator,
     setWsSend, startCall, handleIncomingOffer,
     acceptCall, rejectCall, hangup,
     toggleMute, toggleVideo,
     handleAnswer, handleIceCandidate,
     handleRemoteHangup, handleRemoteReject, handleRemoteBusy,
+    startScreenShare, stopScreenShare,
     clearEndReason,
   };
 
