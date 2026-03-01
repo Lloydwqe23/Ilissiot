@@ -5,6 +5,7 @@ import { db } from "../db";
 import { users } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import bcrypt from "bcryptjs";
+import type { RequestHandler } from "express";
 
 declare global {
   namespace Express {
@@ -17,6 +18,12 @@ declare global {
   }
 }
 
+/** Exported so that WebSocket upgrade can also validate the session. */
+export let sessionMiddleware: RequestHandler;
+
+/** Minimum password length enforced at registration and (optionally) login. */
+const MIN_PASSWORD_LENGTH = 8;
+
 export async function setupAuth(app: Express) {
   // Session configuration
   const pgStore = connectPg(session);
@@ -27,14 +34,20 @@ export async function setupAuth(app: Express) {
     tableName: "sessions",
   });
 
-  const sessionMiddleware = session({
-    secret: process.env.SESSION_SECRET || "dev-secret-key",
+  if (!process.env.SESSION_SECRET) {
+    console.warn('WARNING: SESSION_SECRET is not set – using insecure default. Set it in production!');
+  }
+
+  sessionMiddleware = session({
+    secret: process.env.SESSION_SECRET || "dev-secret-key-CHANGE-ME",
     store: sessionStore,
     resave: false,
     saveUninitialized: false,
+    name: 'connect.sid',
     cookie: {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
+      sameSite: 'strict',
       maxAge: 7 * 24 * 60 * 60 * 1000,
     },
   });
@@ -65,6 +78,17 @@ export function registerAuthRoutes(app: Express) {
         return res.status(400).json({ message: "Email and password required" });
       }
 
+      // A03/A07: Validate password strength
+      if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
+        return res.status(400).json({ message: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` });
+      }
+
+      // A03: Basic email format validation
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (typeof email !== 'string' || !emailRegex.test(email)) {
+        return res.status(400).json({ message: "Invalid email format" });
+      }
+
       // Check if user exists
       const existingUser = await db
         .select()
@@ -89,7 +113,13 @@ export function registerAuthRoutes(app: Express) {
         })
         .returning();
 
-      // Set session
+      // A07: Regenerate session ID to prevent session fixation
+      await new Promise<void>((resolve, reject) => {
+        (req as any).session.regenerate((err: any) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
       (req as any).session.userId = newUser[0].id;
       await new Promise((resolve, reject) => {
         (req as any).session.save((err: any) => {
@@ -137,7 +167,13 @@ export function registerAuthRoutes(app: Express) {
         return res.status(401).json({ message: "Invalid email or password" });
       }
 
-      // Set session
+      // A07: Regenerate session ID on login to prevent session fixation
+      await new Promise<void>((resolve, reject) => {
+        (req as any).session.regenerate((err: any) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
       (req as any).session.userId = user.id;
       await new Promise((resolve, reject) => {
         (req as any).session.save((err: any) => {

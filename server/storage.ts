@@ -13,7 +13,15 @@ import {
 } from "@shared/schema";
 import { eq, or, and, desc, asc, ilike, sql, inArray } from "drizzle-orm";
 
-export interface IStorage {
+/** Strip ALL private fields from a user object so other users never see them.
+ * Returns `any` intentionally – the type system's `User` includes these fields
+ * but they must NOT reach the client. */
+function sanitizeUser(user: Record<string, any>): any {
+  const { password, email, theme, createdAt, updatedAt, ...safe } = user;
+  return safe;
+}
+
+interface IStorage {
   // User operations
   searchUsers(query: string, currentUserId: string): Promise<User[]>;
   updateUser(id: string, updates: Partial<User>): Promise<User>;
@@ -39,6 +47,8 @@ export interface IStorage {
   // deletion helpers – scoped so users can remove their own messages for themselves or for everyone
   deleteMessage(messageId: number, userId: string, forAll?: boolean): Promise<void>;
   deleteMessages(items: { id: number; forAll: boolean }[], userId: string): Promise<void>;
+  // A01: verify the user is a member of the chat that owns a given message
+  verifyMessageAccess(messageId: number, userId: string): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -84,12 +94,12 @@ export class DatabaseStorage implements IStorage {
       .from(users)
       .innerJoin(blocks, eq(blocks.blockedId, users.id))
       .where(eq(blocks.blockerId, userId));
-    // join returns {users, blocks} objects; map to user
-    return rows.map(r => r.users);
+    // join returns {users, blocks} objects; map to user and strip sensitive data
+    return rows.map(r => sanitizeUser(r.users)) as User[];
   }
   async searchUsers(query: string, currentUserId: string): Promise<User[]> {
     // Exclude yourself and any users you've blocked or who have blocked you
-    return await db.select()
+    const rows = await db.select()
       .from(users)
       .where(
         and(
@@ -103,6 +113,7 @@ export class DatabaseStorage implements IStorage {
         )
       )
       .limit(20);
+    return rows.map(sanitizeUser) as User[];
   }
 
   async updateUser(id: string, updates: Partial<User>): Promise<User> {
@@ -111,7 +122,7 @@ export class DatabaseStorage implements IStorage {
       .set({ ...updates, updatedAt: new Date() })
       .where(eq(users.id, id))
       .returning();
-    return user;
+    return sanitizeUser(user) as User;
   }
 
   async getChatsForUser(userId: string): Promise<ChatWithMembers[]> {
@@ -146,7 +157,7 @@ export class DatabaseStorage implements IStorage {
     for (const chat of allChats) {
       const membersForChat = allMembers
         .filter(m => m.member.chatId === chat.id)
-        .map(m => ({ ...m.member, user: m.user }));
+        .map(m => ({ ...m.member, user: sanitizeUser(m.user) }));
         
       const [lastMessage] = await db
         .select({
@@ -174,7 +185,7 @@ export class DatabaseStorage implements IStorage {
       result.push({
         ...chat,
         members: membersForChat,
-        lastMessage: lastMessage ? { ...lastMessage.message, sender: lastMessage.sender } : null,
+        lastMessage: lastMessage ? { ...lastMessage.message, sender: sanitizeUser(lastMessage.sender) } : null,
         unreadCount: Number(unreadCountResult[0]?.count || 0)
       });
     }
@@ -218,7 +229,7 @@ export class DatabaseStorage implements IStorage {
 
     return {
       ...chat,
-      members: members.map(m => ({ ...m.member, user: m.user }))
+      members: members.map(m => ({ ...m.member, user: sanitizeUser(m.user) }))
     };
   }
 
@@ -309,7 +320,7 @@ export class DatabaseStorage implements IStorage {
         return {
           ...msg,
           createdAt: created,
-          sender: m.sender,
+          sender: sanitizeUser(m.sender),
         };
       })
       .reverse();
@@ -341,7 +352,7 @@ export class DatabaseStorage implements IStorage {
     return {
       ...message,
       createdAt: created,
-      sender
+      sender: sanitizeUser(sender)
     };
   }
 
@@ -461,6 +472,25 @@ export class DatabaseStorage implements IStorage {
     await db
       .delete(chats)
       .where(eq(chats.id, chatId));
+  }
+
+  // A01: Verify that a user is a member of the chat that owns a message
+  async verifyMessageAccess(messageId: number, userId: string): Promise<boolean> {
+    const [msg] = await db
+      .select({ chatId: messages.chatId })
+      .from(messages)
+      .where(eq(messages.id, messageId));
+    if (!msg) return false;
+    const membership = await db
+      .select({ id: chatMembers.id })
+      .from(chatMembers)
+      .where(
+        and(
+          eq(chatMembers.chatId, msg.chatId),
+          eq(chatMembers.userId, userId)
+        )
+      );
+    return membership.length > 0;
   }
 
   async leaveChatForUser(chatId: number, userId: string): Promise<void> {

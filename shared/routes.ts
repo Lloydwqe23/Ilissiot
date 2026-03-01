@@ -1,23 +1,24 @@
 import { z } from 'zod';
-import { insertChatSchema, insertMessageSchema, chats, messages, WS_EVENTS, type WsMessage } from './schema';
-import type { User } from './models/auth';
+import { WS_EVENTS, type WsMessage } from './schema';
 
 // Re-export WS types for convenience
 export { WS_EVENTS, type WsMessage };
 
 // User schema based on auth models
+// Note: email, theme, createdAt, updatedAt are stripped by sanitizeUser for other
+// users' data, so they must be optional here.
 export const userSchema = z.object({
   id: z.string(),
-  email: z.string().nullable(),
+  email: z.string().nullable().optional(),
   firstName: z.string().nullable(),
   lastName: z.string().nullable(),
   profileImageUrl: z.string().nullable(),
   bio: z.string().nullable(),
   status: z.string().nullable(),
-  theme: z.enum(['light','dark']).default('light'),
+  theme: z.enum(['light','dark']).default('light').optional(),
   lastSeen: z.string().or(z.date()).nullable(),
-  createdAt: z.string().or(z.date()).nullable(),
-  updatedAt: z.string().or(z.date()).nullable(),
+  createdAt: z.string().or(z.date()).nullable().optional(),
+  updatedAt: z.string().or(z.date()).nullable().optional(),
 });
 
 // Response schemas

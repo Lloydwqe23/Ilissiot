@@ -157,9 +157,20 @@ export function CallProvider({ children }: { children: ReactNode }) {
       const track = event.track;
       if (!remote.getTrackById(track.id)) {
         remote.addTrack(track);
-        // if the track ends later (e.g. screen share stopped) remove it
-        track.onended = () => {
+        // When the track ends or is muted (e.g. screen share stopped), remove it
+        // so the viewer's UI properly hides the video element.
+        const handleTrackGone = () => {
           remote.removeTrack(track);
+          setRemoteTrackVersion(v => v + 1);
+          setRemoteStream(remote);
+        };
+        track.onended = handleTrackGone;
+        track.onmute = handleTrackGone;
+        track.onunmute = () => {
+          // Track came back – re-add if missing
+          if (!remote.getTrackById(track.id)) {
+            remote.addTrack(track);
+          }
           setRemoteTrackVersion(v => v + 1);
           setRemoteStream(remote);
         };

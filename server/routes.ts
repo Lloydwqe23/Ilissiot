@@ -1,8 +1,8 @@
 import type { Express } from "express";
-import { type Server } from "http";
+import { type Server, type IncomingMessage, ServerResponse } from "http";
 import { WebSocketServer, WebSocket } from 'ws';
 import { storage } from "./storage";
-import { setupAuth, registerAuthRoutes, isAuthenticated } from "./auth/local";
+import { setupAuth, registerAuthRoutes, isAuthenticated, sessionMiddleware } from "./auth/local";
 import { registerUploadRoutes } from "./upload";
 import { api, WS_EVENTS, type WsMessage } from "@shared/routes";
 import { z } from "zod";
@@ -21,11 +21,24 @@ export async function registerRoutes(
   const wss = new WebSocketServer({ noServer: true });
 
   // Handle upgrade requests for /ws path
+  // A01: Authenticate WebSocket connections via session cookie
   httpServer.on('upgrade', (request, socket, head) => {
     const url = new URL(request.url || '', `http://${request.headers.host}`);
     if (url.pathname === '/ws') {
-      wss.handleUpgrade(request, socket, head, (ws) => {
-        wss.emit('connection', ws, request);
+      // Parse the session from the cookie before upgrading
+      const res = new ServerResponse(request);
+      sessionMiddleware(request as any, res as any, () => {
+        const userId = (request as any).session?.userId;
+        if (!userId) {
+          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+        // Attach the authenticated userId to the request
+        (request as any).authenticatedUserId = userId;
+        wss.handleUpgrade(request, socket, head, (ws) => {
+          wss.emit('connection', ws, request);
+        });
       });
     }
     // Let other upgrade requests (e.g. Vite HMR) pass through
@@ -35,35 +48,35 @@ export async function registerRoutes(
   const clients = new Map<string, WebSocket>();
 
   wss.on('connection', (ws, req) => {
-    // We ideally want to authenticate the WS connection using the session cookie,
-    // but for simplicity in this MVP, we might trust the client to send a 'connect' event with their ID.
-    // In a real app, parse req.headers.cookie and validate the session.
-    let currentUserId: string | null = null;
+    // A01: userId is now authenticated from the session, NOT from the client payload
+    const currentUserId: string = (req as any).authenticatedUserId;
+    clients.set(currentUserId, ws);
+
+    // Mark user as online
+    (async () => {
+      try {
+        await storage.updateUser(currentUserId, { status: 'online' });
+        broadcast(currentUserId, {
+          type: WS_EVENTS.USER_STATUS,
+          payload: { userId: currentUserId, status: 'online' }
+        });
+        const onlineUserIds = Array.from(clients.keys());
+        ws.send(JSON.stringify({
+          type: WS_EVENTS.ONLINE_USERS,
+          payload: { userIds: onlineUserIds }
+        }));
+      } catch (e) {
+        console.error('WS connect error:', e);
+      }
+    })();
 
     ws.on('message', async (data) => {
       try {
         const message: WsMessage = JSON.parse(data.toString());
         
+        // Ignore connect events – auth is handled on upgrade
         if (message.type === WS_EVENTS.CONNECT) {
-          const payload = message.payload as { userId: string };
-          currentUserId = payload.userId;
-          clients.set(currentUserId, ws);
-          
-          // Update status
-          await storage.updateUser(currentUserId, { status: 'online' });
-          
-          // Broadcast status change to everyone else
-          broadcast(currentUserId, {
-            type: WS_EVENTS.USER_STATUS,
-            payload: { userId: currentUserId, status: 'online' }
-          });
-
-          // Send the list of currently online users to this client
-          const onlineUserIds = Array.from(clients.keys());
-          ws.send(JSON.stringify({
-            type: WS_EVENTS.ONLINE_USERS,
-            payload: { userIds: onlineUserIds }
-          }));
+          return;
         }
         else if (message.type === WS_EVENTS.TYPING_START || message.type === WS_EVENTS.TYPING_STOP) {
           // Forward typing events to the chat members
@@ -160,7 +173,9 @@ export async function registerRoutes(
       const input = api.users.updateProfile.input.parse(req.body);
       const userId = req.user.claims.sub;
       const user = await storage.updateUser(userId, input);
-      res.json(user);
+      // Return own profile with all fields except password
+      const { password, ...safeUser } = user as any;
+      res.json(safeUser);
     } catch (err) {
       console.error("Update profile error:", err);
       if (err instanceof z.ZodError) {
@@ -296,7 +311,9 @@ export async function registerRoutes(
   app.get('/api/chats/:chatId/messages', isAuthenticated, async (req: any, res) => {
     try {
       const chatId = Number(req.params.chatId);
-      const limit = Number(req.query.limit) || 50;
+      // A01: Clamp limit to prevent excessive data retrieval
+      const rawLimit = Number(req.query.limit) || 50;
+      const limit = Math.min(Math.max(rawLimit, 1), 200);
       
       // Verify membership
       const chat = await storage.getChat(chatId);
@@ -304,7 +321,7 @@ export async function registerRoutes(
       
       const userId = req.user.claims.sub;
       if (!chat.members.some(m => m.userId === userId)) {
-        return res.status(401).json({ message: "Unauthorized" });
+        return res.status(403).json({ message: "Forbidden" });
       }
 
       const messages = await storage.getMessagesForChat(chatId, userId, limit);
@@ -373,6 +390,13 @@ export async function registerRoutes(
     try {
       const chatId = Number(req.params.chatId);
       const userId = req.user.claims.sub;
+
+      // A01: Verify the user is actually a member of this chat
+      const chat = await storage.getChat(chatId);
+      if (!chat) return res.status(404).json({ message: "Chat not found" });
+      if (!chat.members.some(m => m.userId === userId)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
       
       await storage.markMessagesAsRead(chatId, userId);
       res.json({ success: true });
@@ -479,8 +503,13 @@ export async function registerRoutes(
   app.post('/api/messages/:messageId/delete', isAuthenticated, async (req: any, res) => {
     try {
       const messageId = Number(req.params.messageId);
+      if (isNaN(messageId)) return res.status(400).json({ message: "Invalid message ID" });
       const { forAll } = req.body as { forAll?: boolean };
       const userId = req.user.claims.sub as string;
+
+      // A01: Verify user has access to the message's chat
+      const msgAccess = await storage.verifyMessageAccess(messageId, userId);
+      if (!msgAccess) return res.status(403).json({ message: "Forbidden" });
 
       await storage.deleteMessage(messageId, userId, Boolean(forAll));
       res.json({ success: true });
@@ -495,6 +524,10 @@ export async function registerRoutes(
       const { items } = req.body as { items?: Array<{ id: number; forAll: boolean }> };
       if (!Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ message: "items must be a non-empty array" });
+      }
+      // A01: Limit batch size to prevent abuse
+      if (items.length > 100) {
+        return res.status(400).json({ message: "Maximum 100 messages per batch" });
       }
       const userId = req.user.claims.sub as string;
       await storage.deleteMessages(items.map(i => ({ id: Number(i.id), forAll: Boolean(i.forAll) })), userId);

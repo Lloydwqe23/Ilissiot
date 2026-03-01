@@ -22,8 +22,14 @@ const storage = multer.diskStorage({
     const originalName = Buffer.from(file.originalname, 'latin1').toString('utf-8');
     const timestamp = Date.now();
     const random = Math.round(Math.random() * 1e9);
-    const ext = path.extname(originalName);
-    const name = path.basename(originalName, ext);
+    const ext = path.extname(originalName).toLowerCase();
+    // A08/A03: Sanitize filename – strip path separators and null bytes to prevent
+    // directory traversal and other injection attacks
+    const rawName = path.basename(originalName, ext)
+      .replace(/[\\/:*?"<>|\\x00]/g, '_')  // remove dangerous characters
+      .replace(/\\.\\./g, '_')               // remove directory traversal
+      .slice(0, 100);                       // limit length
+    const name = rawName || 'file';
     cb(null, `${name}-${timestamp}-${random}${ext}`);
   },
 });

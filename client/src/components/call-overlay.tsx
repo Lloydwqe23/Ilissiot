@@ -53,9 +53,11 @@ export function CallOverlay() {
 
   // ── Computed display values ──────────────────────────────────────
   const isVideo = call.type === 'video';
-  const hasRemoteVideo = !!call.remoteStream?.getVideoTracks().length;
+  // Re-evaluate whenever the remote stream reference or its tracks change
+  const activeRemoteVideoTracks = call.remoteStream?.getVideoTracks().filter(t => t.readyState === 'live' && !t.muted) ?? [];
+  const hasRemoteVideo = activeRemoteVideoTracks.length > 0;
   const hasLocalVideo = !!call.localStream?.getVideoTracks().length;
-  const showRemoteVideo = hasRemoteVideo || isVideo;
+  const showRemoteVideo = hasRemoteVideo;
   const showLocalVideo = hasLocalVideo;
   const participantName = call.participant?.name || 'Unknown';
 
@@ -74,13 +76,18 @@ export function CallOverlay() {
       localVideoRef.current.srcObject = call.localStream;
       localVideoRef.current.play().catch(() => {});
     }
-  }, [call.localStream, call.state, showLocalVideo]);
+  }, [call.localStream, call.state, showLocalVideo, showRemoteVideo]);
 
   // ── Attach remote video ──────────────────────────────────────────
   useEffect(() => {
-    if (remoteVideoRef.current && call.remoteStream) {
-      remoteVideoRef.current.srcObject = call.remoteStream;
-      remoteVideoRef.current.play().catch(() => {});
+    const videoEl = remoteVideoRef.current;
+    if (!videoEl) return;
+    if (call.remoteStream && showRemoteVideo) {
+      videoEl.srcObject = call.remoteStream;
+      videoEl.play().catch(() => {});
+    } else {
+      // Clear the video element so the last frame doesn't linger
+      videoEl.srcObject = null;
     }
   }, [call.remoteStream, call.state, showRemoteVideo]);
 

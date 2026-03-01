@@ -10,7 +10,7 @@ if (!process.env.DATABASE_URL) {
   );
 }
 
-export const pool = new Pool({ 
+const pool = new Pool({ 
   connectionString: process.env.DATABASE_URL,
   // Ensure UTF-8 encoding
   application_name: 'ilissiot-messenger',

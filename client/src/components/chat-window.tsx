@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, useMemo, ReactNode } from "react";
+import { useEffect, useRef, useState, ReactNode } from "react";
 import { format, isToday, isYesterday } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, AlertCircle, CheckCircle2, Smile, Phone, Video, Mic, StopCircle, Ban } from "lucide-react";
+import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, CheckCircle2, Smile, Phone, Video, Mic, StopCircle, Ban } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useChat, useBlockStatus, useBlockUser, useUnblockUser } from "@/hooks/use-chats";
 import { useMessages, useSendMessage, useMarkMessagesRead, useDeleteMessages } from "@/hooks/use-messages";
@@ -51,6 +51,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const [uploading, setUploading] = useState(false);
   const [showStickerPicker, setShowStickerPicker] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(0);
+  const emojiGridRef = useRef<HTMLDivElement>(null);
 
   // recording state
   const [recording, setRecording] = useState(false);
@@ -60,9 +61,10 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const recordTimerRef = useRef<number | null>(null);
 
   // emoji categories explicitly grouped
-  const EMOJI_CATEGORIES: { title: string; items: string[] }[] = [
+  const EMOJI_CATEGORIES: { title: string; icon: string; items: string[] }[] = [
     {
       title: 'Faces & Emotions',
+      icon: '😀',
       items: [
         '😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','😉','😊','😇','🥰','😍','🤩','😘','😗','😚','😙',
         '😋','😛','😜','🤪','😝','🤑','🤗','🤭','🤫','🤔','🤐','🤨','😐','😑','😶','😏','😒','🙄','😬','🤥',
@@ -73,24 +75,21 @@ export function ChatWindow({ chatId }: { chatId: number }) {
       ],
     },
     {
-      title: 'Animals – Land',
+      title: 'Animals',
+      icon: '🐶',
       items: [
         '🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🦁','🐮','🐷','🐽','🐸','🐵','🙈','🙉','🙊','🐒','🐔','🐧',
         '🐦','🐤','🐣','🐥','🦆','🦅','🦉','🦇','🐺','🐗','🐴','🦄','🐝','🐛','🦋','🐌','🐞','🐜','🦟','🦗',
         '🕷️','🦂','🐢','🐍','🦎','🐲','🦕','🦖','🦏','🦛','🦘','🦙','🦒','🦓','🐘','🦣','🐪','🐫','🦬',
         '🐃','🐂','🐄','🐎','🐖','🐏','🐑','🐐','🦌','🐕','🐩','🦮','🐕‍🦺','🐈','🐈‍⬛','🐓','🦃','🦤','🦚',
         '🦜','🦢','🕊️','🐇','🦝','🦨','🦡','🦫','🦦','🦥','🐁','🐀','🐿️','🦔',
-      ],
-    },
-    {
-      title: 'Animals – Sea',
-      items: [
-        '🐬','🐳','🐋','🦈','🐊','🐅','🐆','🦓','🦍','🦧','🐘','🦛','🦏','🐪','🐫','🦒','🦘','🦬','🐃',
-        '🐟','🐠','🐡','🦐','🦑','🐙','🦞','🦀','🦪','🐚','🐌',
+        '🐬','🐳','🐋','🦈','🐊','🐅','🐆','🦍','🦧',
+        '🐟','🐠','🐡','🦐','🦑','🐙','🦞','🦀','🦪','🐚',
       ],
     },
     {
       title: 'Nature',
+      icon: '🌸',
       items: [
         '🌸','🌺','🌻','🌹','🌷','🌼','💐','🌾','🍀','🌿','🌱','🌲','🌳','🌴','🌵','🎋','🎍','🍁','🍂','🍃',
         '🍄','🌰','🎄','🌊','🌬️','🌀','🌈','⛅','🌤️','🌥️','☁️','🌦️','🌧️','⛈️','🌩️','🌨️','❄️','🌪️','🌫️','🌙',
@@ -99,16 +98,18 @@ export function ChatWindow({ chatId }: { chatId: number }) {
     },
     {
       title: 'Food & Drink',
+      icon: '🍔',
       items: [
         '🍎','🍊','🍋','🍇','🍓','🫐','🍈','🍒','🍑','🥭','🍍','🥥','🥝','🍅','🫒','🥑','🍆','🥦','🥬','🥒',
         '🌶️','🫑','🧄','🧅','🥕','🌽','🍠','🧆','🥜','🌰','🍞','🥐','🥖','🫓','🥨','🧀','🥚','🍳','🧈','🥞',
-        '🧇','🥓','🥩','🍗','🍖','🌭','🍔','🍟','🍕','🫔','🌮','🌯','🥙','🧆','🥚','🍝','🍜','🍛','🍲','🫕',
+        '🧇','🥓','🥩','🍗','🍖','🌭','🍔','🍟','🍕','🫔','🌮','🌯','🥙','🍝','🍜','🍛','🍲','🫕',
         '🍣','🍱','🥟','🦪','🍤','🍙','🍚','🍘','🍥','🥮','🍢','🧁','🍰','🎂','🍮','🍭','🍬','🍫','🍿','🍩',
-        '🍪','🌰','🥜','🍯','🧃','🥤','🧋','☕','🍵','🫖','🍺','🍻','🥂','🍷','🫗','🥃','🍸','🍹','🧉','🍾',
+        '🍪','🍯','🧃','🥤','🧋','☕','🍵','🫖','🍺','🍻','🥂','🍷','🫗','🥃','🍸','🍹','🧉','🍾',
       ],
     },
     {
-      title: 'Activities & Sports',
+      title: 'Activities',
+      icon: '⚽',
       items: [
         '⚽','🏀','🏈','⚾','🥎','🎾','🏐','🏉','🥏','🎱','🪀','🏓','🏸','🏒','🥍','🏑','🏏','🪃','🥅','⛳',
         '🪁','🏹','🎣','🤿','🥊','🥋','🎽','🛹','🛼','🛷','⛸️','🥌','🎿','⛷️','🏂','🪂','🏋️','🤼','🤸','⛹️',
@@ -117,7 +118,8 @@ export function ChatWindow({ chatId }: { chatId: number }) {
       ],
     },
     {
-      title: 'Travel & Places',
+      title: 'Travel',
+      icon: '✈️',
       items: [
         '🚗','🚕','🚙','🚌','🚎','🏎️','🚓','🚑','🚒','🚐','🛻','🚚','🚛','🚜','🏍️','🛵','🛺','🚲','🛴','🛹',
         '🚁','🛸','✈️','🛩️','🚀','🛶','⛵','🚤','🛥️','🛳️','🚂','🚃','🚄','🚅','🚆','🚇','🚈','🚉','🚊','🚝',
@@ -127,6 +129,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
     },
     {
       title: 'Objects',
+      icon: '💡',
       items: [
         '⌚','📱','💻','🖥️','⌨️','🖱️','🖨️','📠','📺','📷','📸','📹','🎥','📽️','🎞️','📞','☎️','📟','📡',
         '🔋','🪫','🔌','💡','🔦','🕯️','🪔','🧯','🛢️','💰','💴','💵','💶','💷','💸','💳','🪙','💹','📈','📉',
@@ -137,7 +140,8 @@ export function ChatWindow({ chatId }: { chatId: number }) {
       ],
     },
     {
-      title: 'Symbols & Misc',
+      title: 'Symbols',
+      icon: '❤️',
       items: [
         '❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','💟','☮️',
         '✝️','☪️','🕉️','☸️','✡️','🔯','🕎','☯️','☦️','🛐','⛎','♈','♉','♊','♋','♌','♍','♎','♏','♐',
@@ -145,6 +149,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
     },
     {
       title: 'Hands & People',
+      icon: '👋',
       items: [
         '👋','🤚','🖐️','✋','🖖','👌','🤌','🤏','✌️','🤞','🤟','🤘','🤙','👈','👉','👆','🖕','👇','☝️','👍',
         '👎','✊','👊','🤛','🤜','👏','🙌','👐','🤲','🤝','🙏','✍️','💅','🤳','💪','🦾','🦵','🦶','👂','🦻',
@@ -152,16 +157,11 @@ export function ChatWindow({ chatId }: { chatId: number }) {
       ],
     },
     {
-      title: 'Flags & More',
+      title: 'Flags',
+      icon: '🏁',
       items: [
         '🏁','🚩','🎌','🏴','🏳️','🎏','🎀','🎁','🎊','🎉','🎈','🎍','🎋','🎎','🎑','🎃','🎄','🎆','🎇','🧨',
         '✨','🎐','🧧','🎠','🎡','🎢','🎪','🤹','🎭','🎨','🖼️','🎰','🎲','🧩','🎯','🎳','🎮','🕹️',
-      ],
-    },
-    {
-      title: 'Plants & Earth',
-      items: [
-        '🌱','🌿','☘️','🍀','🎍','🎋','🍃','🍂','🍁','🌾','🌺','🌻','🌹','🌷','🌸','💐','🍄','🌰','🎄',
       ],
     },
   ];
@@ -854,35 +854,47 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                 <Smile className="w-5 h-5" />
               </button>
               {showStickerPicker && (
-                <div className="absolute bottom-full mb-2 right-0 w-48 bg-card border border-border/50 rounded-lg shadow-lg p-2">
-                  {/* category tabs */}
-                  <div className="flex space-x-1 mb-1 overflow-x-auto scrollbar-hide">
+                <div className="absolute bottom-full mb-2 right-0 w-[340px] bg-card border border-border/50 rounded-xl shadow-xl z-50 flex flex-col overflow-hidden">
+                  {/* Category name header */}
+                  <div className="px-3 pt-2.5 pb-1">
+                    <span className="text-xs font-semibold text-muted-foreground">{EMOJI_CATEGORIES[selectedCategory].title}</span>
+                  </div>
+                  {/* emoji grid */}
+                  <div ref={emojiGridRef} className="px-2 pb-1 overflow-y-auto" style={{ height: '220px' }}>
+                    <div className="grid grid-cols-8 gap-0.5">
+                      {EMOJI_CATEGORIES[selectedCategory].items.map((emoji, i) => (
+                        <button
+                          key={`${selectedCategory}-${i}`}
+                          type="button"
+                          className="w-9 h-9 flex items-center justify-center text-[22px] rounded-lg hover:bg-accent transition-colors"
+                          onClick={() => {
+                            setInputValue(prev => prev + emoji);
+                            setShowStickerPicker(false);
+                          }}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* category icon bar at bottom */}
+                  <div className="flex items-center justify-around border-t border-border/50 px-1 py-1.5 bg-accent/30">
                     {EMOJI_CATEGORIES.map((cat, idx) => (
                       <button
                         key={cat.title}
                         type="button"
-                        className={`px-2 py-1 rounded text-xs whitespace-nowrap ${
-                          selectedCategory === idx ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'
+                        title={cat.title}
+                        className={`w-8 h-8 flex items-center justify-center text-lg rounded-lg transition-colors ${
+                          selectedCategory === idx
+                            ? 'bg-primary/15 scale-110'
+                            : 'hover:bg-accent opacity-70 hover:opacity-100'
                         }`}
-                        onClick={() => setSelectedCategory(idx)}
-                      >
-                        {cat.title}
-                      </button>
-                    ))}
-                  </div>
-                  {/* emoji grid */}
-                  <div className="grid grid-cols-5 gap-2 max-h-40 overflow-y-auto scrollbar-hide">
-                    {EMOJI_CATEGORIES[selectedCategory].items.map((emoji) => (
-                      <button
-                        key={emoji}
-                        type="button"
-                        className="w-12 h-12 flex items-center justify-center text-2xl"
                         onClick={() => {
-                          setInputValue(prev => prev + emoji);
-                          setShowStickerPicker(false);
+                          setSelectedCategory(idx);
+                          emojiGridRef.current?.scrollTo(0, 0);
                         }}
                       >
-                        {emoji}
+                        {cat.icon}
                       </button>
                     ))}
                   </div>

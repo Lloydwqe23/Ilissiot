@@ -79,8 +79,8 @@ export function UserSearch({ open, onOpenChange }: { open: boolean; onOpenChange
           ) : (
             <div className="space-y-1 p-2">
               {users?.map(u => {
-                const name = [u.firstName, u.lastName].filter(Boolean).join(" ") || u.email || "Unknown User";
-                const initials = (u.firstName?.[0] || u.email?.[0] || "U").toUpperCase();
+                const name = [u.firstName, u.lastName].filter(Boolean).join(" ") || "Unknown User";
+                const initials = (u.firstName?.[0] || "U").toUpperCase();
                 
                 return (
                   <button
