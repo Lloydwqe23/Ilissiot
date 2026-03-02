@@ -11,6 +11,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger, ContextMenuSeparator } from "@/components/ui/context-menu";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { useLocation } from "wouter";
 
 /** Turn URLs in text into clickable <a> elements. */
@@ -59,6 +61,11 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   // editing state
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
 
+  // delete dialog state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [pendingDeleteItems, setPendingDeleteItems] = useState<Array<{ id: number; forAll: boolean }>>([]);
+  const [hasOwnInDelete, setHasOwnInDelete] = useState(false);
+
   // recording state
   const [recording, setRecording] = useState(false);
   const [recordTime, setRecordTime] = useState(0); // ms
@@ -71,8 +78,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const [isSearching, setIsSearching] = useState(false);
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
 
-  // reaction picker state
-  const [reactionPickerMessageId, setReactionPickerMessageId] = useState<number | null>(null);
+
 
   // Calculate all text matches in messages (for navigation)
   const allMatches = (() => {
@@ -664,25 +670,26 @@ export function ChatWindow({ chatId }: { chatId: number }) {
     selectedMessages.forEach(id => {
       const msg = messages?.find(m => m.id === id);
       const isMine = msg?.senderId === user?.id;
-      items.push({ id, forAll: !!isMine });
+      items.push({ id, forAll: false });
       if (isMine) ownCount += 1;
     });
-    const otherCount = items.length - ownCount;
 
-    if (otherCount === 0) {
-      const deleteForEveryone = confirm(
-        `You are deleting ${items.length} message(s).\nOK will remove them for everyone, Cancel will keep them visible to others and only delete for you.`
-      );
-      items.forEach(i => (i.forAll = deleteForEveryone));
-    } else if (ownCount === 0) {
-      if (!confirm(`Delete ${items.length} message(s) for yourself? You cannot remove other users' messages.`)) return;
-    } else {
-      if (!confirm(`Delete ${ownCount} of your messages for everyone and ${otherCount} messages just for yourself?`)) return;
-    }
+    setPendingDeleteItems(items);
+    setHasOwnInDelete(ownCount > 0);
+    setDeleteDialogOpen(true);
+  };
 
+  const executeDelete = (forAll: boolean) => {
+    const items = pendingDeleteItems.map(item => {
+      const msg = messages?.find(m => m.id === item.id);
+      const isMine = msg?.senderId === user?.id;
+      return { id: item.id, forAll: forAll && !!isMine };
+    });
     deleteMessages.mutate(items, {
       onSuccess: () => { setSelectedMessages(new Set()); setSelectionMode(false); }
     });
+    setDeleteDialogOpen(false);
+    setPendingDeleteItems([]);
   };
 
   const cancelSelection = () => {
@@ -708,7 +715,6 @@ export function ChatWindow({ chatId }: { chatId: number }) {
 
   const handleAddReaction = (messageId: number, emoji: string) => {
     addReaction.mutate({ messageId, emoji });
-    setReactionPickerMessageId(null);
   };
 
   const handleRemoveReaction = (messageId: number, emoji: string) => {
@@ -732,16 +738,21 @@ export function ChatWindow({ chatId }: { chatId: number }) {
               <span className="font-semibold text-[15px]">{selectedMessages.size} selected</span>
             </div>
             <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleEditSelected}
-                disabled={selectedMessages.size !== 1}
-                className="flex items-center gap-2"
-              >
-                <Pencil className="w-4 h-4" />
-                Edit
-              </Button>
+              {selectedMessages.size === 1 && (() => {
+                const selId = Array.from(selectedMessages)[0];
+                const selMsg = messages?.find(m => m.id === selId);
+                return selMsg?.senderId === user?.id;
+              })() && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleEditSelected}
+                  className="flex items-center gap-2"
+                >
+                  <Pencil className="w-4 h-4" />
+                  Edit
+                </Button>
+              )}
               <Button
                 variant="destructive"
                 size="sm"
@@ -946,19 +957,15 @@ export function ChatWindow({ chatId }: { chatId: number }) {
 
 
                 return (
-                  <motion.div
-                    key={msg.id}
-                    data-message-id={msg.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className={`flex items-end gap-2 ${isMine ? 'justify-end' : 'justify-start'} cursor-pointer`}
-                    onClick={() => { if (selectionMode) toggleMessageSelection(msg.id); }}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      if (!selectionMode) setSelectionMode(true);
-                      toggleMessageSelection(msg.id);
-                    }}
-                  >
+                  <ContextMenu key={msg.id}>
+                    <ContextMenuTrigger asChild>
+                    <motion.div
+                      data-message-id={msg.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className={`flex items-end gap-2 ${isMine ? 'justify-end' : 'justify-start'} cursor-pointer`}
+                      onClick={() => { if (selectionMode) toggleMessageSelection(msg.id); }}
+                    >
                     {/* Selection checkbox */}
                     {selectionMode && (
                       <div className="flex items-center shrink-0 self-center">
@@ -1070,63 +1077,64 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                           });
                         })()}
 
-                        {/* Add reaction button - only show if not own message */}
-                        {!isMine && (
-                        <DropdownMenu open={reactionPickerMessageId === msg.id} onOpenChange={(open) => {
-                          setReactionPickerMessageId(open ? msg.id : null);
-                        }}>
-                          <DropdownMenuTrigger asChild>
-                            <button
-                              className={`flex items-center justify-center w-6 h-6 rounded-full transition-all
-                                ${reactionPickerMessageId === msg.id || isSelected
-                                  ? 'opacity-100'
-                                  : 'opacity-0 group-hover:opacity-100'
-                                }
-                                bg-muted/50 hover:bg-muted text-muted-foreground
-                              `}
-                              title="Add reaction"
-                            >
-                              <Smile className="w-3.5 h-3.5" />
-                            </button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="p-0 w-64 max-h-80">
-                            <div className="flex flex-col">
-                              <div className="flex border-b border-border/50">
-                                {EMOJI_CATEGORIES.map((cat, idx) => (
-                                  <button
-                                    key={idx}
-                                    onClick={() => setSelectedCategory(idx)}
-                                    className={`flex-1 py-2 text-center transition-colors ${ selectedCategory === idx
-                                      ? 'bg-muted text-foreground'
-                                      : 'hover:bg-muted/50 text-muted-foreground'
-                                    }`}
-                                    title={cat.title}
-                                  >
-                                    {cat.icon}
-                                  </button>
-                                ))}
-                              </div>
-                              <div className="p-2 bg-card/50 grid grid-cols-6 gap-1 max-h-48 overflow-y-auto">
-                                {EMOJI_CATEGORIES[selectedCategory].items.map((emoji, i) => (
-                                  <button
-                                    key={i}
-                                    onClick={() => {
-                                      handleAddReaction(msg.id, emoji);
-                                      setReactionPickerMessageId(null);
-                                    }}
-                                    className="flex items-center justify-center text-2xl hover:bg-muted rounded transition-colors p-1"
-                                  >
-                                    {emoji}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                        )}
+                        {/* Add reaction button removed - use right-click context menu instead */}
                       </div>
                     </div>
                   </motion.div>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent className="w-48">
+                      <ContextMenuItem onClick={() => {
+                        if (!selectionMode) setSelectionMode(true);
+                        toggleMessageSelection(msg.id);
+                      }}>
+                        <CheckCircle2 className="w-4 h-4 mr-2" />
+                        Select
+                      </ContextMenuItem>
+                      {!isMine && (
+                        <>
+                          <ContextMenuSeparator />
+                          <ContextMenuSub>
+                            <ContextMenuSubTrigger>
+                              <Smile className="w-4 h-4 mr-2" />
+                              React
+                            </ContextMenuSubTrigger>
+                            <ContextMenuSubContent className="p-0 w-64">
+                              <div className="flex flex-col">
+                                <div className="flex border-b border-border/50">
+                                  {EMOJI_CATEGORIES.map((cat, idx) => (
+                                    <button
+                                      key={idx}
+                                      onClick={() => setSelectedCategory(idx)}
+                                      className={`flex-1 py-2 text-center transition-colors ${selectedCategory === idx
+                                        ? 'bg-muted text-foreground'
+                                        : 'hover:bg-muted/50 text-muted-foreground'
+                                      }`}
+                                      title={cat.title}
+                                    >
+                                      {cat.icon}
+                                    </button>
+                                  ))}
+                                </div>
+                                <div className="p-2 bg-card/50 grid grid-cols-6 gap-1 max-h-48 overflow-y-auto">
+                                  {EMOJI_CATEGORIES[selectedCategory].items.map((emoji, i) => (
+                                    <button
+                                      key={i}
+                                      onClick={() => {
+                                        handleAddReaction(msg.id, emoji);
+                                      }}
+                                      className="flex items-center justify-center text-2xl hover:bg-muted rounded transition-colors p-1"
+                                    >
+                                      {emoji}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            </ContextMenuSubContent>
+                          </ContextMenuSub>
+                        </>
+                      )}
+                    </ContextMenuContent>
+                  </ContextMenu>
                 );
               })}
             </AnimatePresence>
@@ -1331,6 +1339,52 @@ export function ChatWindow({ chatId }: { chatId: number }) {
         </form>
         )}
       </div>
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          setDeleteDialogOpen(false);
+          setPendingDeleteItems([]);
+        }
+      }}>
+        <DialogContent className="sm:max-w-md" aria-describedby="delete-dialog-description">
+          <DialogHeader>
+            <DialogTitle>Delete {pendingDeleteItems.length} message{pendingDeleteItems.length !== 1 ? 's' : ''}?</DialogTitle>
+            <DialogDescription id="delete-dialog-description">
+              {hasOwnInDelete
+                ? "Choose how you want to delete the selected message(s)."
+                : "You can only delete other people's messages for yourself."}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex flex-col gap-2 sm:flex-col">
+            {hasOwnInDelete && (
+              <Button
+                variant="destructive"
+                onClick={() => executeDelete(true)}
+                className="w-full"
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Delete for everyone
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              onClick={() => executeDelete(false)}
+              className="w-full"
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Delete for me
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => { setDeleteDialogOpen(false); setPendingDeleteItems([]); }}
+              className="w-full"
+            >
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

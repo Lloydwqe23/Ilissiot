@@ -640,11 +640,18 @@ export async function registerRoutes(
 
       const reaction = await storage.addReaction(messageId, userId, emoji);
       
-      // Broadcast to WebSocket clients
-      broadcastToChat(reaction.message_reactions.messageId, {
-        type: 'message:reaction:add',
-        payload: reaction,
-      });
+      // Broadcast to WebSocket clients in the same chat
+      const chat = await storage.getChat(message.chatId);
+      if (chat) {
+        chat.members.forEach(member => {
+          if (member.userId !== userId) {
+            sendToUser(member.userId!, {
+              type: WS_EVENTS.MESSAGE_REACTION_ADD,
+              payload: reaction,
+            });
+          }
+        });
+      }
 
       res.status(201).json(reaction);
     } catch (err: any) {
@@ -667,13 +674,29 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Emoji is required" });
       }
 
+      // Fetch message to get chat context for broadcasting
+      const [message] = await db
+        .select()
+        .from(messages)
+        .where(eq(messages.id, messageId))
+        .limit(1);
+
       await storage.removeReaction(messageId, userId, emoji);
       
-      // Broadcast to WebSocket clients
-      broadcastToChat(messageId, {
-        type: 'message:reaction:remove',
-        payload: { messageId, userId, emoji },
-      });
+      // Broadcast to WebSocket clients in the same chat
+      if (message) {
+        const chat = await storage.getChat(message.chatId);
+        if (chat) {
+          chat.members.forEach(member => {
+            if (member.userId !== userId) {
+              sendToUser(member.userId!, {
+                type: WS_EVENTS.MESSAGE_REACTION_REMOVE,
+                payload: { messageId, userId, emoji },
+              });
+            }
+          });
+        }
+      }
 
       res.json({ success: true });
     } catch (err: any) {

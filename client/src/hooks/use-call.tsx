@@ -224,27 +224,40 @@ export function CallProvider({ children }: { children: ReactNode }) {
     if (!wsSendRef.current || state !== 'idle') return;
 
     try {
-      let stream: MediaStream;
+      let stream: MediaStream | null = null;
+      // Try to get media, with progressive fallbacks
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: true,
           video: callType === 'video',
         });
       } catch (mediaErr: any) {
-        if (callType === 'video' && (mediaErr.name === 'NotReadableError' || mediaErr.name === 'NotFoundError')) {
-          console.warn('[Call] Camera unavailable, falling back to audio-only:', mediaErr.message);
-          stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        console.warn('[Call] Media access failed, trying fallback:', mediaErr.name, mediaErr.message);
+        if (callType === 'video') {
+          // Video failed — try audio-only
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          } catch (audioErr: any) {
+            console.warn('[Call] Audio also unavailable, starting call with no local media:', audioErr.message);
+            stream = null;
+          }
         } else {
-          throw mediaErr;
+          // Audio-only call but mic failed — start with no local media
+          console.warn('[Call] Microphone unavailable, starting call with no local media');
+          stream = null;
         }
       }
-      localStreamRef.current = stream;
+      if (stream) {
+        localStreamRef.current = stream;
+      }
 
       const { pc, remote } = createPC(p.userId);
 
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+      if (stream) {
+        stream.getTracks().forEach(track => pc.addTrack(track, stream!));
+      }
 
-      const offer = await pc.createOffer();
+      const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: callType === 'video' });
       await pc.setLocalDescription(offer);
 
       wsSendRef.current({
@@ -260,8 +273,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setChatId(cId);
       setLocalStream(stream);
       setRemoteStream(remote);
-      setIsMuted(false);
-      setIsVideoOff(false);
+      setIsMuted(!stream || !stream.getAudioTracks().length);
+      setIsVideoOff(!stream || !stream.getVideoTracks().length);
       setEndReason(null);
     } catch (err) {
       console.error('[Call] Failed to start:', err);
@@ -325,26 +338,37 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
     try {
       console.log('[Call] Requesting media…');
-      let stream: MediaStream;
+      let stream: MediaStream | null = null;
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: true,
           video: type === 'video',
         });
       } catch (mediaErr: any) {
-        // If video device is busy, fall back to audio-only
-        if (type === 'video' && (mediaErr.name === 'NotReadableError' || mediaErr.name === 'NotFoundError')) {
-          console.warn('[Call] Camera unavailable, falling back to audio-only:', mediaErr.message);
-          stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        console.warn('[Call] Media access failed, trying fallback:', mediaErr.name, mediaErr.message);
+        if (type === 'video') {
+          // Video failed — try audio-only
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          } catch (audioErr: any) {
+            console.warn('[Call] Audio also unavailable, accepting call with no local media:', audioErr.message);
+            stream = null;
+          }
         } else {
-          throw mediaErr;
+          // Audio-only call but mic failed — accept with no local media
+          console.warn('[Call] Microphone unavailable, accepting call with no local media');
+          stream = null;
         }
       }
-      localStreamRef.current = stream;
+      if (stream) {
+        localStreamRef.current = stream;
+      }
 
       const { pc, remote } = createPC(participant.userId);
 
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+      if (stream) {
+        stream.getTracks().forEach(track => pc.addTrack(track, stream!));
+      }
 
       console.log('[Call] Setting remote description…');
       await pc.setRemoteDescription(new RTCSessionDescription(offerSdp));
@@ -364,8 +388,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
       const now = Date.now();
       setStartTime(now);
       startTimeRef.current = now;
-      setIsMuted(false);
-      setIsVideoOff(false);
+      setIsMuted(!stream || !stream.getAudioTracks().length);
+      setIsVideoOff(!stream || !stream.getVideoTracks().length);
     } catch (err) {
       console.error('[Call] Failed to accept:', err);
       rejectCall();
