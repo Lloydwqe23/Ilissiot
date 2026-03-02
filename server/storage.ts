@@ -3,11 +3,13 @@ import {
   chats,
   chatMembers,
   messages,
+  messageReactions,
   users,
   blocks,
   type User,
   type ChatWithMembers,
   type MessageWithSender,
+  type ReactionWithUser,
   type InsertChat,
   type InsertMessage,
 } from "@shared/schema";
@@ -39,6 +41,7 @@ interface IStorage {
   
   // Message operations
   getMessagesForChat(chatId: number, userId: string, limit?: number): Promise<MessageWithSender[]>;
+  searchMessagesInChat(chatId: number, query: string, userId: string, limit?: number): Promise<MessageWithSender[]>;
   createMessage(message: InsertMessage & { senderId: string }): Promise<MessageWithSender>;
   markMessagesAsRead(chatId: number, userId: string): Promise<void>;
   clearMessagesForUser(chatId: number, userId: string): Promise<void>;
@@ -47,6 +50,12 @@ interface IStorage {
   // deletion helpers – scoped so users can remove their own messages for themselves or for everyone
   deleteMessage(messageId: number, userId: string, forAll?: boolean): Promise<void>;
   deleteMessages(items: { id: number; forAll: boolean }[], userId: string): Promise<void>;
+  // message editing
+  editMessage(messageId: number, userId: string, newContent: string): Promise<MessageWithSender>;
+  // message reactions
+  addReaction(messageId: number, userId: string, emoji: string): Promise<ReactionWithUser>;
+  removeReaction(messageId: number, userId: string, emoji: string): Promise<void>;
+  getReactions(messageId: number): Promise<ReactionWithUser[]>;
   // A01: verify the user is a member of the chat that owns a given message
   verifyMessageAccess(messageId: number, userId: string): Promise<boolean>;
 }
@@ -326,6 +335,48 @@ export class DatabaseStorage implements IStorage {
       .reverse();
   }
 
+  async searchMessagesInChat(chatId: number, query: string, userId: string, limit = 50): Promise<MessageWithSender[]> {
+    const msgs = await db
+      .select({
+        message: messages,
+        sender: users,
+      })
+      .from(messages)
+      .innerJoin(users, eq(messages.senderId, users.id))
+      .where(and(eq(messages.chatId, chatId), ilike(messages.content, `%${query}%`)))
+      .orderBy(desc(messages.createdAt))
+      .limit(limit);
+
+    // Filter out messages deleted for this user and format
+    return msgs
+      .filter(m => {
+        let deletedBy = m.message.deletedBy as any;
+        if (deletedBy && typeof deletedBy === 'string') {
+          try {
+            deletedBy = JSON.parse(deletedBy);
+          } catch {
+            deletedBy = [];
+          }
+        }
+        if (!deletedBy || !Array.isArray(deletedBy)) return true;
+        return !deletedBy.includes(userId);
+      })
+      .map(m => {
+        const msg = m.message;
+        const created: Date | null = msg.createdAt
+          ? msg.createdAt instanceof Date
+            ? msg.createdAt
+            : new Date(msg.createdAt as any)
+          : null;
+        return {
+          ...msg,
+          createdAt: created,
+          sender: sanitizeUser(m.sender),
+        };
+      })
+      .reverse();
+  }
+
   async createMessage(messageData: InsertMessage & { senderId: string }): Promise<MessageWithSender> {
     const [message] = await db
       .insert(messages)
@@ -455,6 +506,146 @@ export class DatabaseStorage implements IStorage {
           eq(messages.senderId, userId)
         )
       );
+  }
+
+  async editMessage(messageId: number, userId: string, newContent: string): Promise<MessageWithSender> {
+    // First verify the message exists and belongs to the user
+    const [message] = await db
+      .select()
+      .from(messages)
+      .where(eq(messages.id, messageId))
+      .limit(1);
+
+    if (!message) {
+      throw new Error('Message not found');
+    }
+
+    if (message.senderId !== userId) {
+      throw new Error('You can only edit your own messages');
+    }
+
+    // Update the message
+    await db
+      .update(messages)
+      .set({
+        content: newContent,
+        isEdited: true,
+      })
+      .where(eq(messages.id, messageId));
+
+    // Return the updated message with sender info
+    const [updated] = await db
+      .select()
+      .from(messages)
+      .innerJoin(users, eq(messages.senderId, users.id))
+      .where(eq(messages.id, messageId))
+      .limit(1);
+
+    return {
+      ...updated.messages,
+      sender: sanitizeUser(updated.users),
+    };
+  }
+
+  async addReaction(messageId: number, userId: string, emoji: string): Promise<ReactionWithUser> {
+    // Verify message exists
+    const [message] = await db
+      .select()
+      .from(messages)
+      .where(eq(messages.id, messageId))
+      .limit(1);
+
+    if (!message) {
+      throw new Error('Message not found');
+    }
+
+    // Check if this is the same emoji (user toggling)
+    const [existing] = await db
+      .select()
+      .from(messageReactions)
+      .where(
+        and(
+          eq(messageReactions.messageId, messageId),
+          eq(messageReactions.userId, userId),
+          eq(messageReactions.emoji, emoji)
+        )
+      )
+      .limit(1);
+
+    if (existing) {
+      // Already reacted with this emoji, return the existing reaction
+      const [reaction] = await db
+        .select()
+        .from(messageReactions)
+        .innerJoin(users, eq(messageReactions.userId, users.id))
+        .where(eq(messageReactions.id, existing.id))
+        .limit(1);
+
+      return {
+        ...reaction.message_reactions,
+        user: sanitizeUser(reaction.users),
+      };
+    }
+
+    // Remove any previous reactions from this user on this message (one reaction per user)
+    await db
+      .delete(messageReactions)
+      .where(
+        and(
+          eq(messageReactions.messageId, messageId),
+          eq(messageReactions.userId, userId)
+        )
+      );
+
+    // Add new reaction
+    const [newReaction] = await db
+      .insert(messageReactions)
+      .values({
+        messageId,
+        userId,
+        emoji,
+      })
+      .returning();
+
+    // Get the reaction with user info
+    const [reaction] = await db
+      .select()
+      .from(messageReactions)
+      .innerJoin(users, eq(messageReactions.userId, users.id))
+      .where(eq(messageReactions.id, newReaction.id))
+      .limit(1);
+
+    return {
+      ...reaction.message_reactions,
+      user: sanitizeUser(reaction.users),
+    };
+  }
+
+  async removeReaction(messageId: number, userId: string, emoji: string): Promise<void> {
+    // Delete the reaction
+    await db
+      .delete(messageReactions)
+      .where(
+        and(
+          eq(messageReactions.messageId, messageId),
+          eq(messageReactions.userId, userId),
+          eq(messageReactions.emoji, emoji)
+        )
+      );
+  }
+
+  async getReactions(messageId: number): Promise<ReactionWithUser[]> {
+    const reactions = await db
+      .select()
+      .from(messageReactions)
+      .innerJoin(users, eq(messageReactions.userId, users.id))
+      .where(eq(messageReactions.messageId, messageId))
+      .orderBy(asc(messageReactions.createdAt));
+
+    return reactions.map(r => ({
+      ...r.message_reactions,
+      user: sanitizeUser(r.users),
+    }));
   }
 
   async deleteChat(chatId: number): Promise<void> {

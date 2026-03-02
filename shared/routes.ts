@@ -31,6 +31,15 @@ export const chatMemberResponseSchema = z.object({
   user: userSchema,
 });
 
+export const reactionResponseSchema = z.object({
+  id: z.number(),
+  messageId: z.number(),
+  userId: z.string(),
+  emoji: z.string(),
+  createdAt: z.string().or(z.date()).nullable(),
+  user: userSchema,
+});
+
 export const messageResponseSchema = z.object({
   id: z.number(),
   chatId: z.number(),
@@ -46,6 +55,7 @@ export const messageResponseSchema = z.object({
   createdAt: z.string().or(z.date()).nullable(),
   updatedAt: z.string().or(z.date()).nullable(),
   sender: userSchema,
+  reactions: z.array(reactionResponseSchema).optional(),
 });
 
 export const chatResponseSchema = z.object({
@@ -185,6 +195,19 @@ export const api = {
         404: errorSchemas.notFound,
       },
     },
+    search: {
+      method: 'GET' as const,
+      path: '/api/chats/:chatId/messages/search' as const,
+      input: z.object({
+        q: z.string().min(1),
+        limit: z.coerce.number().optional(),
+      }).optional(),
+      responses: {
+        200: z.array(messageResponseSchema),
+        401: errorSchemas.unauthorized,
+        404: errorSchemas.notFound,
+      },
+    },
     send: {
       method: 'POST' as const,
       path: '/api/chats/:chatId/messages' as const,
@@ -241,7 +264,41 @@ export const api = {
         401: errorSchemas.unauthorized,
         400: errorSchemas.validation,
       },
-    }
+    },
+    edit: {
+      method: 'PUT' as const,
+      path: '/api/messages/:messageId' as const,
+      input: z.object({
+        content: z.string().min(1),
+      }),
+      responses: {
+        200: messageResponseSchema,
+        401: errorSchemas.unauthorized,
+        403: z.object({ message: z.string() }),
+        404: errorSchemas.notFound,
+      },
+    },
+    addReaction: {
+      method: 'POST' as const,
+      path: '/api/messages/:messageId/reactions' as const,
+      input: z.object({
+        emoji: z.string().min(1).max(10),
+      }),
+      responses: {
+        201: reactionResponseSchema,
+        401: errorSchemas.unauthorized,
+        404: errorSchemas.notFound,
+      },
+    },
+    removeReaction: {
+      method: 'DELETE' as const,
+      path: '/api/messages/:messageId/reactions/:emoji' as const,
+      responses: {
+        200: z.object({ success: z.boolean() }),
+        401: errorSchemas.unauthorized,
+        404: errorSchemas.notFound,
+      },
+    },
   }
 };
 
@@ -259,4 +316,5 @@ export function buildUrl(path: string, params?: Record<string, string | number>)
 
 export type ChatResponse = z.infer<typeof chatResponseSchema>;
 export type MessageResponse = z.infer<typeof messageResponseSchema>;
+export type ReactionResponse = z.infer<typeof reactionResponseSchema>;
 export type UserResponse = z.infer<typeof userSchema>;

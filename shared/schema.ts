@@ -66,6 +66,18 @@ export const messages = pgTable("messages", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
+export const messageReactions = pgTable("message_reactions", {
+  id: serial("id").primaryKey(),
+  messageId: serial("message_id").references(() => messages.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "cascade" }),
+  emoji: varchar("emoji").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+}, (table) => [
+  index("IDX_message_user_emoji").on(table.messageId, table.userId, table.emoji),
+]);
+
+export type MessageReaction = typeof messageReactions.$inferSelect;
+
 // --- RELATIONS ---
 
 // table to record one user blocking another
@@ -99,9 +111,15 @@ export const chatMembersRelations = relations(chatMembers, ({ one }) => ({
   user: one(users, { fields: [chatMembers.userId], references: [users.id] }),
 }));
 
-export const messagesRelations = relations(messages, ({ one }) => ({
+export const messagesRelations = relations(messages, ({ one, many }) => ({
   chat: one(chats, { fields: [messages.chatId], references: [chats.id] }),
   sender: one(users, { fields: [messages.senderId], references: [users.id] }),
+  reactions: many(messageReactions),
+}));
+
+export const messageReactionsRelations = relations(messageReactions, ({ one }) => ({
+  message: one(messages, { fields: [messageReactions.messageId], references: [messages.id] }),
+  user: one(users, { fields: [messageReactions.userId], references: [users.id] }),
 }));
 
 // --- SCHEMAS ---
@@ -129,6 +147,21 @@ export type MessageWithSender = Message & {
   sender: User;
 };
 
+export type ReactionWithUser = MessageReaction & {
+  user: User;
+};
+
+export type MessageWithReactions = MessageWithSender & {
+  reactions?: ReactionWithUser[];
+};
+
+// Grouped reactions for display: { emoji: string, count: number, userReacted: boolean }
+export type ReactionGroup = {
+  emoji: string;
+  count: number;
+  userReacted: boolean;
+};
+
 // WebSocket Event Types
 export const WS_EVENTS = {
   CONNECT: 'connect',
@@ -136,6 +169,8 @@ export const WS_EVENTS = {
   MESSAGE_EDIT: 'message:edit',
   MESSAGE_DELETE: 'message:delete',
   MESSAGE_READ: 'message:read',
+  MESSAGE_REACTION_ADD: 'message:reaction:add',
+  MESSAGE_REACTION_REMOVE: 'message:reaction:remove',
   USER_STATUS: 'user:status',
   ONLINE_USERS: 'users:online',
   TYPING_START: 'typing:start',

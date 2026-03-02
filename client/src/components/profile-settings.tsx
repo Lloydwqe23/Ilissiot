@@ -154,6 +154,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
       theme,
     }, {
       onSuccess: () => {
+        applyTheme(theme); // Apply theme immediately
         toast({ title: "Profile updated successfully" });
         onOpenChange(false);
       },

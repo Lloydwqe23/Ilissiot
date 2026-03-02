@@ -2,6 +2,9 @@ import type { Express } from "express";
 import { type Server, type IncomingMessage, ServerResponse } from "http";
 import { WebSocketServer, WebSocket } from 'ws';
 import { storage } from "./storage";
+import { db } from "./db";
+import { messages } from "@shared/schema";
+import { eq } from "drizzle-orm";
 import { setupAuth, registerAuthRoutes, isAuthenticated, sessionMiddleware } from "./auth/local";
 import { registerUploadRoutes } from "./upload";
 import { api, WS_EVENTS, type WsMessage } from "@shared/routes";
@@ -325,7 +328,53 @@ export async function registerRoutes(
       }
 
       const messages = await storage.getMessagesForChat(chatId, userId, limit);
-      res.json(messages);
+      
+      // Fetch reactions for all messages
+      const messagesWithReactions = await Promise.all(
+        messages.map(async (msg) => {
+          const reactions = await storage.getReactions(msg.id);
+          return { ...msg, reactions };
+        })
+      );
+      
+      res.json(messagesWithReactions);
+    } catch (err) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Search messages in chat
+  app.get('/api/chats/:chatId/messages/search', isAuthenticated, async (req: any, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const query = String(req.query.q || '').trim();
+      if (!query) {
+        return res.status(400).json({ message: "Search query required" });
+      }
+      
+      const rawLimit = Number(req.query.limit) || 50;
+      const limit = Math.min(Math.max(rawLimit, 1), 200);
+      
+      // Verify membership
+      const chat = await storage.getChat(chatId);
+      if (!chat) return res.status(404).json({ message: "Chat not found" });
+      
+      const userId = req.user.claims.sub;
+      if (!chat.members.some(m => m.userId === userId)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const messages = await storage.searchMessagesInChat(chatId, query, userId, limit);
+      
+      // Fetch reactions for all messages
+      const messagesWithReactions = await Promise.all(
+        messages.map(async (msg) => {
+          const reactions = await storage.getReactions(msg.id);
+          return { ...msg, reactions };
+        })
+      );
+      
+      res.json(messagesWithReactions);
     } catch (err) {
       res.status(500).json({ message: "Internal server error" });
     }
@@ -533,6 +582,105 @@ export async function registerRoutes(
       await storage.deleteMessages(items.map(i => ({ id: Number(i.id), forAll: Boolean(i.forAll) })), userId);
       res.json({ success: true });
     } catch (err) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Edit message
+  app.put('/api/messages/:messageId', isAuthenticated, async (req: any, res) => {
+    try {
+      const messageId = Number(req.params.messageId);
+      const userId = req.user.claims.sub as string;
+      const { content } = req.body as { content?: string };
+
+      if (!content || !content.trim()) {
+        return res.status(400).json({ message: "Message content cannot be empty" });
+      }
+
+      const updatedMessage = await storage.editMessage(messageId, userId, content);
+      res.json(updatedMessage);
+    } catch (err: any) {
+      if (err.message === 'Message not found') {
+        return res.status(404).json({ message: "Message not found" });
+      }
+      if (err.message === 'You can only edit your own messages') {
+        return res.status(403).json({ message: "You can only edit your own messages" });
+      }
+      console.error('Error editing message:', err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Add reaction to a message
+  app.post('/api/messages/:messageId/reactions', isAuthenticated, async (req: any, res) => {
+    try {
+      const messageId = Number(req.params.messageId);
+      const userId = req.user.claims.sub as string;
+      const { emoji } = req.body as { emoji?: string };
+
+      if (!emoji) {
+        return res.status(400).json({ message: "Emoji is required" });
+      }
+
+      // Fetch message to check ownership
+      const [message] = await db
+        .select()
+        .from(messages)
+        .where(eq(messages.id, messageId))
+        .limit(1);
+
+      if (!message) {
+        return res.status(404).json({ message: "Message not found" });
+      }
+
+      // Prevent reacting to own messages
+      if (message.senderId === userId) {
+        return res.status(403).json({ message: "You cannot react to your own messages" });
+      }
+
+      const reaction = await storage.addReaction(messageId, userId, emoji);
+      
+      // Broadcast to WebSocket clients
+      broadcastToChat(reaction.message_reactions.messageId, {
+        type: 'message:reaction:add',
+        payload: reaction,
+      });
+
+      res.status(201).json(reaction);
+    } catch (err: any) {
+      if (err.message === 'Message not found') {
+        return res.status(404).json({ message: "Message not found" });
+      }
+      console.error('Error adding reaction:', err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Remove reaction from a message
+  app.delete('/api/messages/:messageId/reactions/:emoji', isAuthenticated, async (req: any, res) => {
+    try {
+      const messageId = Number(req.params.messageId);
+      const userId = req.user.claims.sub as string;
+      const { emoji } = req.params;
+
+      if (!emoji) {
+        return res.status(400).json({ message: "Emoji is required" });
+      }
+
+      await storage.removeReaction(messageId, userId, emoji);
+      
+      // Broadcast to WebSocket clients
+      broadcastToChat(messageId, {
+        type: 'message:reaction:remove',
+        payload: { messageId, userId, emoji },
+      });
+
+      res.json({ success: true });
+    } catch (err: any) {
+      if (err.message === 'Message not found') {
+        return res.status(404).json({ message: "Message not found" });
+      }
+      console.error('Error removing reaction:', err);
       res.status(500).json({ message: "Internal server error" });
     }
   });

@@ -147,6 +147,69 @@ export function useChatWebSocket(userId: string | undefined) {
             callRef.current.handleRemoteBusy();
           }
 
+          // ── Message Reactions ─────────────────────────────────────
+          if (data.type === WS_EVENTS.MESSAGE_REACTION_ADD) {
+            const reaction = data.payload;
+            const messageId = reaction.messageId;
+            const reactionUserId = reaction.userId;
+            
+            // Skip reactions from current user - mutations handle those
+            if (reactionUserId === userId) return;
+            
+            // Update all message lists (including search results) that might contain this message
+            const keys = queryClient.getQueryCache().getAll();
+            keys.forEach(cache => {
+              const isMainMessages = cache.queryKey[0] === api.messages.list.path;
+              const isSearchMessages = cache.queryKey[0] === 'messages.search';
+              
+              if (isMainMessages || isSearchMessages) {
+                queryClient.setQueryData<MessageResponse[]>(cache.queryKey, (old) => {
+                  if (!old) return old;
+                  return old.map(msg => {
+                    if (msg.id === messageId) {
+                      // Remove this user's previous reactions, then add the new one
+                      let reactions = (msg.reactions || []).filter(
+                        r => r.userId !== reactionUserId
+                      );
+                      reactions = [...reactions, reaction];
+                      return { ...msg, reactions };
+                    }
+                    return msg;
+                  });
+                });
+              }
+            });
+          }
+
+          if (data.type === WS_EVENTS.MESSAGE_REACTION_REMOVE) {
+            const { messageId, userId: reactionUserId, emoji } = data.payload;
+            
+            // Skip reactions from current user - mutations handle those
+            if (reactionUserId === userId) return;
+            
+            // Update all message lists (including search results) that might contain this message
+            const keys = queryClient.getQueryCache().getAll();
+            keys.forEach(cache => {
+              const isMainMessages = cache.queryKey[0] === api.messages.list.path;
+              const isSearchMessages = cache.queryKey[0] === 'messages.search';
+              
+              if (isMainMessages || isSearchMessages) {
+                queryClient.setQueryData<MessageResponse[]>(cache.queryKey, (old) => {
+                  if (!old) return old;
+                  return old.map(msg => {
+                    if (msg.id === messageId) {
+                      const reactions = (msg.reactions || []).filter(
+                        r => !(r.userId === reactionUserId && r.emoji === emoji)
+                      );
+                      return { ...msg, reactions };
+                    }
+                    return msg;
+                  });
+                });
+              }
+            });
+          }
+
         } catch (err) {
           console.error('[WS] Parse error:', err);
         }
