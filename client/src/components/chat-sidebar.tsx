@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useRoute, useLocation } from "wouter";
-import { format } from "date-fns";
+import { format, isToday, isYesterday } from "date-fns";
 import { Edit, LogOut, Settings, MoreVertical, ArrowLeft, Image, Mic, Video, Phone, FileText, Sticker } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useChats, useDeleteChat, useBlockUser, useUnblockUser, useBlockStatus } from "@/hooks/use-chats";
@@ -25,6 +25,18 @@ function OnlineIndicator({ userId }: { userId: string | undefined }) {
   return (
     <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-sidebar z-10" />
   );
+}
+
+/** Format last message timestamp: HH:mm if today, "Yesterday" if yesterday, or date if older */
+function formatLastMessageTime(createdAt: string | Date): string {
+  const date = new Date(createdAt);
+  if (isToday(date)) {
+    return format(date, 'HH:mm');
+  }
+  if (isYesterday(date)) {
+    return 'Yesterday';
+  }
+  return format(date, 'MMM d');
 }
 
 // component representing a single chat row with actions
@@ -89,7 +101,7 @@ function ChatSidebarItem({
             </span>
             {lastMsg && (
               <span className="text-[11px] whitespace-nowrap ml-2 text-sidebar-foreground/50 group-hover:text-sidebar-foreground/80">
-                {format(new Date(lastMsg.createdAt!), 'HH:mm')}
+                {formatLastMessageTime(lastMsg.createdAt!)}
               </span>
             )}
           </div>

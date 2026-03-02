@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, ReactNode } from "react";
 import { format, isToday, isYesterday } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, CheckCircle2, Smile, Phone, Video, Mic, StopCircle, Ban, Search, Pencil, Check } from "lucide-react";
+import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, CheckCircle2, Smile, Phone, Video, Mic, StopCircle, Ban, Search, Pencil, Check, Play, Pause, Download } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useChat, useBlockStatus, useBlockUser, useUnblockUser } from "@/hooks/use-chats";
 import { useMessages, useSendMessage, useMarkMessagesRead, useDeleteMessages, useEditMessage, useAddReaction, useRemoveReaction } from "@/hooks/use-messages";
@@ -13,7 +13,165 @@ import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger, ContextMenuSeparator } from "@/components/ui/context-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { UserProfileModal } from "@/components/user-profile-modal";
 import { useLocation } from "wouter";
+
+/** Audio message component with custom waveform player */
+function AudioMessage({ url, name, isMine }: { url: string; name: string; isMine: boolean }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const progressRef = useRef<HTMLDivElement>(null);
+
+  const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const onTimeUpdate = () => {
+      setCurrentTime(audio.currentTime);
+      setProgress(audio.duration ? (audio.currentTime / audio.duration) * 100 : 0);
+    };
+    const onLoaded = () => setDuration(audio.duration);
+    const onEnded = () => { setPlaying(false); setProgress(0); setCurrentTime(0); };
+    audio.addEventListener("timeupdate", onTimeUpdate);
+    audio.addEventListener("loadedmetadata", onLoaded);
+    audio.addEventListener("ended", onEnded);
+    return () => {
+      audio.removeEventListener("timeupdate", onTimeUpdate);
+      audio.removeEventListener("loadedmetadata", onLoaded);
+      audio.removeEventListener("ended", onEnded);
+    };
+  }, []);
+
+  const togglePlay = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (playing) { audio.pause(); setPlaying(false); }
+    else { audio.play(); setPlaying(true); }
+  };
+
+  const changeSpeed = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const audio = audioRef.current;
+    if (!audio) return;
+    const next = SPEEDS[(SPEEDS.indexOf(playbackRate) + 1) % SPEEDS.length];
+    setPlaybackRate(next);
+    audio.playbackRate = next;
+  };
+
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    const audio = audioRef.current;
+    const bar = progressRef.current;
+    if (!audio || !bar) return;
+    const rect = bar.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    audio.currentTime = ratio * audio.duration;
+  };
+
+  const fmt = (s: number) => {
+    if (!s || isNaN(s)) return "0:00";
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m}:${sec.toString().padStart(2, "0")}`;
+  };
+
+  const bars = [3,5,8,4,9,6,10,7,5,8,4,6,9,3,7,10,5,8,4,6,9,7,5,3,8,6,10,4,7,5,9,6];
+  const isActive = playbackRate !== 1;
+
+  return (
+    <div className={`flex items-center gap-3 mt-2 px-3 py-2.5 rounded-2xl max-w-[260px] w-full
+      ${isMine
+        ? "bg-white/15 text-primary-foreground"
+        : "bg-primary/8 dark:bg-white/8 text-foreground border border-border/40"
+      }`}
+    >
+      <audio ref={audioRef} src={url} preload="metadata" />
+
+      {/* Play/Pause */}
+      <button
+        onClick={togglePlay}
+        className={`shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95
+          ${isMine
+            ? "bg-white/25 hover:bg-white/35 text-primary-foreground"
+            : "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm"
+          }`}
+      >
+        {playing
+          ? <Pause className="w-4 h-4 fill-current" />
+          : <Play className="w-4 h-4 fill-current translate-x-0.5" />
+        }
+      </button>
+
+      {/* Waveform + bottom row */}
+      <div className="flex-1 flex flex-col gap-1 min-w-0">
+        {/* Waveform */}
+        <div
+          ref={progressRef}
+          onClick={handleSeek}
+          className="flex items-center gap-[2px] h-8 cursor-pointer group"
+        >
+          {bars.map((h, i) => {
+            const isPlayed = (i / bars.length) * 100 <= progress;
+            return (
+              <div
+                key={i}
+                className={`w-[3px] rounded-full transition-colors flex-shrink-0 ${
+                  isPlayed
+                    ? isMine ? "bg-white/90" : "bg-primary"
+                    : isMine ? "bg-white/35 group-hover:bg-white/45" : "bg-foreground/20 group-hover:bg-foreground/30"
+                }`}
+                style={{ height: `${Math.round((h / 10) * 24 + 4)}px` }}
+              />
+            );
+          })}
+        </div>
+
+        {/* Bottom row: time left · speed right */}
+        <div className="flex items-center justify-between">
+          <span className={`text-[10px] font-medium tabular-nums leading-none
+            ${isMine ? "text-primary-foreground/60" : "text-muted-foreground"}`}>
+            {playing || currentTime > 0 ? fmt(currentTime) : fmt(duration)}
+          </span>
+
+          <button
+            onClick={changeSpeed}
+            className={`text-[10px] font-bold tabular-nums leading-none px-1.5 py-0.5 rounded transition-all active:scale-95
+              ${isActive
+                ? isMine
+                  ? "bg-white/25 text-primary-foreground"
+                  : "bg-primary text-primary-foreground"
+                : isMine
+                  ? "text-primary-foreground/50 hover:text-primary-foreground/80 hover:bg-white/10"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
+              }`}
+            title="Playback speed"
+          >
+            {playbackRate}×
+          </button>
+        </div>
+      </div>
+
+      {/* Download */}
+      <a
+        href={url}
+        download={name}
+        onClick={(e) => e.stopPropagation()}
+        className={`shrink-0 p-1.5 rounded-lg transition-colors
+          ${isMine
+            ? "text-primary-foreground/60 hover:text-primary-foreground/90 hover:bg-white/15"
+            : "text-muted-foreground hover:text-foreground hover:bg-muted"
+          }`}
+        title="Download"
+      >
+        <Download className="w-3.5 h-3.5" />
+      </a>
+    </div>
+  );
+}
 
 /** Turn URLs in text into clickable <a> elements. */
 function linkifyText(text: string): ReactNode[] {
@@ -78,7 +236,9 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const [isSearching, setIsSearching] = useState(false);
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
 
-
+  // profile modal state
+  const [profileUser, setProfileUser] = useState<typeof user | null>(null);
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
 
   // Calculate all text matches in messages (for navigation)
   const allMatches = (() => {
@@ -218,7 +378,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   };
 
   // helper for rendering attachments of a message
-  const renderAttachments = (msg: any) => {
+  const renderAttachments = (msg: any, isMine: boolean) => {
     const files: any[] = msg.attachments || [];
     if (files.length === 0) return null;
 
@@ -234,7 +394,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
     }
 
     return (
-      <div className="mt-3 pt-3 border-t border-current border-opacity-20 space-y-2">
+      <div className="mt-3 space-y-2">
         {files.map((file: any, idx: number) => {
           if (file.type === 'sticker') {
             return <span key={idx} className="text-4xl">{file.name}</span>;
@@ -289,24 +449,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
           } else if (isVideo) {
             return <video key={idx} src={file.url} controls className="max-w-xs rounded-lg" />;
           } else if (isAudio) {
-            return (
-              <div
-                key={idx}
-                className="flex items-center gap-2 p-3 rounded-lg bg-black/10 dark:bg-white/10 hover:bg-black/20 dark:hover:bg-white/20 transition-colors max-w-xs"
-              >
-                <audio src={file.url} controls className="flex-1 h-8" />
-                <a
-                  href={file.url}
-                  download={file.name}
-                  className="p-1 rounded hover:bg-black/20 dark:hover:bg-white/20"
-                  title="Download audio"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                  </svg>
-                </a>
-              </div>
-            );
+            return <AudioMessage key={idx} url={file.url} name={file.name} isMine={isMine} />;
           } else {
             return (
               <a
@@ -770,12 +913,28 @@ export function ChatWindow({ chatId }: { chatId: number }) {
             <div className="flex items-center gap-3">
               {isMobile && <SidebarTrigger className="mr-1 -ml-2" />}
 
-              <Avatar className="w-10 h-10 border border-border/50">
+              <Avatar 
+                className={`w-10 h-10 border border-border/50 ${!chat?.isGroup && otherMember ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
+                onClick={() => {
+                  if (!chat?.isGroup && otherMember) {
+                    setProfileUser(otherMember.user);
+                    setProfileModalOpen(true);
+                  }
+                }}
+              >
                 <AvatarImage src={avatarUrl || ""} />
                 <AvatarFallback className="bg-primary/10 text-primary font-medium">{displayName?.[0] || 'U'}</AvatarFallback>
               </Avatar>
 
-              <div className="flex flex-col">
+              <div 
+                className={`flex flex-col ${!chat?.isGroup && otherMember ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
+                onClick={() => {
+                  if (!chat?.isGroup && otherMember) {
+                    setProfileUser(otherMember.user);
+                    setProfileModalOpen(true);
+                  }
+                }}
+              >
                 <h2 className="font-semibold text-[15px] leading-tight text-foreground">{displayName}</h2>
                 <span className={`text-[12px] ${!chat.isGroup && statusText === 'online' ? 'text-green-500 font-medium' : 'text-muted-foreground'}`}>
                   {chat.isGroup ? `${chat.members.length} members` : statusText}
@@ -954,18 +1113,34 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                 const isSelected = selectedMessages.has(msg.id);
                 const isCurrentMatch = isSearching && allMatches.length > 0 && allMatches[currentMatchIndex]?.messageId === msg.id;
                 const hasMatch = isSearching && allMatches.some(m => m.messageId === msg.id);
+                const currentMsgDate = new Date(msg.createdAt!);
+                const previousMsgDate = messages[idx - 1]?.createdAt ? new Date(messages[idx - 1].createdAt) : null;
+                const showDateDivider = !previousMsgDate || currentMsgDate.toDateString() !== previousMsgDate.toDateString();
+                const dateDividerLabel = isToday(currentMsgDate)
+                  ? "Today"
+                  : isYesterday(currentMsgDate)
+                    ? "Yesterday"
+                    : format(currentMsgDate, "MMMM d, yyyy");
 
 
                 return (
-                  <ContextMenu key={msg.id}>
-                    <ContextMenuTrigger asChild>
-                    <motion.div
-                      data-message-id={msg.id}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className={`flex items-end gap-2 ${isMine ? 'justify-end' : 'justify-start'} cursor-pointer`}
-                      onClick={() => { if (selectionMode) toggleMessageSelection(msg.id); }}
-                    >
+                  <div key={msg.id}>
+                    {showDateDivider && (
+                      <div className="flex justify-center my-2">
+                        <span className="px-3 py-1 rounded-full text-[11px] font-medium bg-muted/80 text-muted-foreground border border-border/50">
+                          {dateDividerLabel}
+                        </span>
+                      </div>
+                    )}
+                    <ContextMenu>
+                      <ContextMenuTrigger asChild>
+                      <motion.div
+                        data-message-id={msg.id}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className={`flex items-end gap-2 ${isMine ? 'justify-end' : 'justify-start'} cursor-pointer`}
+                        onClick={() => { if (selectionMode) toggleMessageSelection(msg.id); }}
+                      >
                     {/* Selection checkbox */}
                     {selectionMode && (
                       <div className="flex items-center shrink-0 self-center">
@@ -980,7 +1155,16 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                     {!isMine && (
                       <div className="w-8 shrink-0 flex justify-center">
                         {showAvatar && (
-                          <Avatar className="w-8 h-8 border border-border/50 shadow-sm">
+                          <Avatar 
+                            className="w-8 h-8 border border-border/50 shadow-sm cursor-pointer hover:opacity-80 transition-opacity"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!selectionMode) {
+                                setProfileUser(msg.sender);
+                                setProfileModalOpen(true);
+                              }
+                            }}
+                          >
                             <AvatarImage src={msg.sender?.profileImageUrl || ""} />
                             <AvatarFallback className="text-[10px] bg-primary/10 text-primary">
                               {msg.sender?.firstName?.[0] || 'U'}
@@ -1013,7 +1197,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                       })()}
 
                       {/* Attachments */}
-                      {renderAttachments(msg)}
+                      {renderAttachments(msg, isMine)}
 
                       <div className={`flex items-center justify-end gap-1 mt-1 ${isMine ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
                         {msg.isEdited && (
@@ -1080,9 +1264,9 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                         {/* Add reaction button removed - use right-click context menu instead */}
                       </div>
                     </div>
-                  </motion.div>
-                    </ContextMenuTrigger>
-                    <ContextMenuContent className="w-48">
+                      </motion.div>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent className="w-48">
                       <ContextMenuItem onClick={() => {
                         if (!selectionMode) setSelectionMode(true);
                         toggleMessageSelection(msg.id);
@@ -1133,8 +1317,9 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                           </ContextMenuSub>
                         </>
                       )}
-                    </ContextMenuContent>
-                  </ContextMenu>
+                      </ContextMenuContent>
+                    </ContextMenu>
+                  </div>
                 );
               })}
             </AnimatePresence>
@@ -1385,6 +1570,31 @@ export function ChatWindow({ chatId }: { chatId: number }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* User Profile Modal */}
+      {profileUser && (
+        <UserProfileModal
+          user={profileUser}
+          open={profileModalOpen}
+          onOpenChange={setProfileModalOpen}
+          onCall={(type) => {
+            if (profileUser.id && chat) {
+              call.startCall(
+                {
+                  userId: profileUser.id,
+                  name: [profileUser.firstName, profileUser.lastName].filter(Boolean).join(' ') || profileUser.email || 'Unknown',
+                  avatarUrl: profileUser.profileImageUrl,
+                },
+                chat.id,
+                type === 'video' ? 'video' : 'audio',
+                [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.email || 'Unknown',
+                user?.profileImageUrl
+              );
+              setProfileModalOpen(false);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

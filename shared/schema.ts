@@ -23,6 +23,7 @@ export const users = pgTable("users", {
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
   bio: text("bio"),
+  birthday: varchar("birthday"), // Format: YYYY-MM-DD
   status: varchar("status", { length: 20 }).default('offline'),
   theme: varchar("theme", { length: 10 }).default('light'),
   lastSeen: timestamp("last_seen", { withTimezone: true }).defaultNow(),
