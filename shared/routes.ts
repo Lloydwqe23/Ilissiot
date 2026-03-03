@@ -29,6 +29,7 @@ export const chatMemberResponseSchema = z.object({
   userId: z.string(),
   role: z.string().nullable(),
   joinedAt: z.string().or(z.date()).nullable(),
+  pinnedAt: z.string().or(z.date()).nullable().optional(),
   user: userSchema,
 });
 
@@ -180,6 +181,64 @@ export const api = {
         201: chatResponseSchema,
         400: errorSchemas.validation,
         401: errorSchemas.unauthorized,
+      },
+    },
+    createGroup: {
+      method: 'POST' as const,
+      path: '/api/chats/group' as const,
+      input: z.object({
+        name: z.string().min(1).max(100),
+        memberIds: z.array(z.string()).min(1),
+      }),
+      responses: {
+        201: chatResponseSchema,
+        400: errorSchemas.validation,
+        401: errorSchemas.unauthorized,
+      },
+    },
+    updateGroup: {
+      method: 'PATCH' as const,
+      path: '/api/chats/:chatId' as const,
+      input: z.object({
+        name: z.string().min(1).max(100).optional(),
+        avatarUrl: z.string().nullable().optional(),
+      }),
+      responses: {
+        200: chatResponseSchema,
+        400: errorSchemas.validation,
+        401: errorSchemas.unauthorized,
+        404: errorSchemas.notFound,
+      },
+    },
+    addMembers: {
+      method: 'POST' as const,
+      path: '/api/chats/:chatId/members' as const,
+      input: z.object({
+        userIds: z.array(z.string()).min(1),
+      }),
+      responses: {
+        200: chatResponseSchema,
+        400: errorSchemas.validation,
+        401: errorSchemas.unauthorized,
+        404: errorSchemas.notFound,
+      },
+    },
+    removeMember: {
+      method: 'DELETE' as const,
+      path: '/api/chats/:chatId/members/:userId' as const,
+      responses: {
+        200: z.object({ success: z.boolean() }),
+        401: errorSchemas.unauthorized,
+        404: errorSchemas.notFound,
+      },
+    },
+    leaveGroup: {
+      method: 'POST' as const,
+      path: '/api/chats/:chatId/leave' as const,
+      responses: {
+        200: z.object({ success: z.boolean() }),
+        401: errorSchemas.unauthorized,
+        404: errorSchemas.notFound,
       },
     },
   },

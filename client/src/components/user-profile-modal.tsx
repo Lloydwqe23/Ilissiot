@@ -26,13 +26,13 @@ export function UserProfileModal({
   const formatBirthday = (birthday: string | undefined) => {
     if (!birthday) return null;
     const date = new Date(birthday);
-    return date.toLocaleDateString(undefined, { month: 'long', day: 'numeric' });
+    return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   };
 
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[425px] rounded-2xl p-0 overflow-hidden border-border/50 shadow-2xl">
+      <DialogContent className="sm:max-w-[425px] rounded-2xl p-0 overflow-hidden border-border/50 shadow-2xl" aria-describedby={undefined}>
         <DialogHeader className="p-6 bg-gradient-to-b from-primary/10 to-transparent border-b border-border/50">
           <div className="flex flex-col items-center gap-4">
             <Avatar 
@@ -112,7 +112,7 @@ export function UserProfileModal({
 
     {/* Photo Preview Dialog */}
     <Dialog open={!!previewImageUrl} onOpenChange={(open) => { if (!open) setPreviewImageUrl(null); }}>
-      <DialogContent className="sm:max-w-[600px] rounded-2xl p-0 overflow-hidden border-border/50 shadow-2xl">
+      <DialogContent className="sm:max-w-[600px] rounded-2xl p-0 overflow-hidden border-border/50 shadow-2xl" aria-describedby={undefined}>
         <DialogHeader className="p-4 border-b border-border/50">
           <DialogTitle>Profile Photo</DialogTitle>
         </DialogHeader>

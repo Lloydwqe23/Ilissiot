@@ -36,6 +36,10 @@ interface IStorage {
   getChatsForUser(userId: string): Promise<ChatWithMembers[]>;
   getChat(id: number): Promise<ChatWithMembers | undefined>;
   createDirectChat(userId1: string, userId2: string): Promise<ChatWithMembers>;
+  createGroupChat(name: string, creatorId: string, memberIds: string[]): Promise<ChatWithMembers>;
+  updateGroupChat(chatId: number, updates: { name?: string; avatarUrl?: string | null }): Promise<ChatWithMembers>;
+  addGroupMembers(chatId: number, userIds: string[]): Promise<ChatWithMembers>;
+  removeGroupMember(chatId: number, userId: string): Promise<void>;
   deleteChat(chatId: number): Promise<void>;
   leaveChatForUser(chatId: number, userId: string): Promise<void>;
   
@@ -58,6 +62,8 @@ interface IStorage {
   getReactions(messageId: number): Promise<ReactionWithUser[]>;
   // A01: verify the user is a member of the chat that owns a given message
   verifyMessageAccess(messageId: number, userId: string): Promise<boolean>;
+  // Get the chat (with members) that a message belongs to
+  getChatByMessageId(messageId: number): Promise<ChatWithMembers | null>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -217,6 +223,15 @@ export class DatabaseStorage implements IStorage {
     });
 
     return Array.from(uniqueChats.values()).sort((a, b) => {
+      // Pinned chats go first, sorted by pinnedAt desc
+      const aPinned = a.members.find(m => m.userId === userId)?.pinnedAt;
+      const bPinned = b.members.find(m => m.userId === userId)?.pinnedAt;
+      if (aPinned && !bPinned) return -1;
+      if (!aPinned && bPinned) return 1;
+      if (aPinned && bPinned) {
+        return new Date(bPinned).getTime() - new Date(aPinned).getTime();
+      }
+      // Then sort by last message date
       const dateA = a.lastMessage?.createdAt || a.createdAt;
       const dateB = b.lastMessage?.createdAt || b.createdAt;
       return new Date(dateB!).getTime() - new Date(dateA!).getTime();
@@ -289,6 +304,92 @@ export class DatabaseStorage implements IStorage {
 
     // Return the full chat object
     return this.getChat(chat.id) as Promise<ChatWithMembers>;
+  }
+
+  async createGroupChat(name: string, creatorId: string, memberIds: string[]): Promise<ChatWithMembers> {
+    // Create the group chat
+    const [chat] = await db
+      .insert(chats)
+      .values({ isGroup: true, name })
+      .returning();
+
+    // Add creator as admin + all other members
+    const allMemberIds = [creatorId, ...memberIds.filter(id => id !== creatorId)];
+    await db.insert(chatMembers).values(
+      allMemberIds.map((userId, i) => ({
+        chatId: chat.id,
+        userId,
+        role: i === 0 ? 'admin' : 'member',
+      }))
+    );
+
+    return this.getChat(chat.id) as Promise<ChatWithMembers>;
+  }
+
+  async updateGroupChat(chatId: number, updates: { name?: string; avatarUrl?: string | null }): Promise<ChatWithMembers> {
+    await db
+      .update(chats)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(chats.id, chatId));
+
+    return this.getChat(chatId) as Promise<ChatWithMembers>;
+  }
+
+  async addGroupMembers(chatId: number, userIds: string[]): Promise<ChatWithMembers> {
+    // Get existing member IDs to avoid duplicates
+    const existing = await db
+      .select({ userId: chatMembers.userId })
+      .from(chatMembers)
+      .where(eq(chatMembers.chatId, chatId));
+    const existingIds = new Set(existing.map(e => e.userId));
+
+    const newMembers = userIds.filter(id => !existingIds.has(id));
+    if (newMembers.length > 0) {
+      await db.insert(chatMembers).values(
+        newMembers.map(userId => ({
+          chatId,
+          userId,
+          role: 'member',
+        }))
+      );
+    }
+
+    return this.getChat(chatId) as Promise<ChatWithMembers>;
+  }
+
+  async removeGroupMember(chatId: number, userId: string): Promise<void> {
+    await db
+      .delete(chatMembers)
+      .where(
+        and(
+          eq(chatMembers.chatId, chatId),
+          eq(chatMembers.userId, userId)
+        )
+      );
+  }
+
+  async pinChat(chatId: number, userId: string): Promise<void> {
+    await db
+      .update(chatMembers)
+      .set({ pinnedAt: new Date() })
+      .where(
+        and(
+          eq(chatMembers.chatId, chatId),
+          eq(chatMembers.userId, userId)
+        )
+      );
+  }
+
+  async unpinChat(chatId: number, userId: string): Promise<void> {
+    await db
+      .update(chatMembers)
+      .set({ pinnedAt: null })
+      .where(
+        and(
+          eq(chatMembers.chatId, chatId),
+          eq(chatMembers.userId, userId)
+        )
+      );
   }
 
   async getMessagesForChat(chatId: number, userId: string, limit = 50): Promise<MessageWithSender[]> {
@@ -682,6 +783,15 @@ export class DatabaseStorage implements IStorage {
         )
       );
     return membership.length > 0;
+  }
+
+  async getChatByMessageId(messageId: number): Promise<ChatWithMembers | null> {
+    const [msg] = await db
+      .select({ chatId: messages.chatId })
+      .from(messages)
+      .where(eq(messages.id, messageId));
+    if (!msg) return null;
+    return this.getChat(msg.chatId);
   }
 
   async leaveChatForUser(chatId: number, userId: string): Promise<void> {

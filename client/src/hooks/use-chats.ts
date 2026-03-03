@@ -71,6 +71,138 @@ export function useDeleteChat() {
   });
 }
 
+export function usePinChat() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (chatId: number) => {
+      const res = await fetch(`/api/chats/${chatId}/pin`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+      if (!res.ok) throw new Error('Failed to pin chat');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.chats.list.path] });
+    }
+  });
+}
+
+export function useUnpinChat() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (chatId: number) => {
+      const res = await fetch(`/api/chats/${chatId}/unpin`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+      if (!res.ok) throw new Error('Failed to unpin chat');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.chats.list.path] });
+    }
+  });
+}
+
+export function useCreateGroupChat() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ name, memberIds }: { name: string; memberIds: string[] }) => {
+      const res = await fetch(api.chats.createGroup.path, {
+        method: api.chats.createGroup.method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, memberIds }),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || "Failed to create group");
+      }
+      return api.chats.createGroup.responses[201].parse(await res.json());
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.chats.list.path] });
+    },
+  });
+}
+
+export function useUpdateGroupChat() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ chatId, name, avatarUrl }: { chatId: number; name?: string; avatarUrl?: string | null }) => {
+      const url = `/api/chats/${chatId}`;
+      const res = await fetch(url, {
+        method: 'PATCH',
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, avatarUrl }),
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Failed to update group');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.chats.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.chats.get.path] });
+    }
+  });
+}
+
+export function useAddGroupMembers() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ chatId, userIds }: { chatId: number; userIds: string[] }) => {
+      const res = await fetch(`/api/chats/${chatId}/members`, {
+        method: 'POST',
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userIds }),
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Failed to add members');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.chats.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.chats.get.path] });
+    }
+  });
+}
+
+export function useRemoveGroupMember() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ chatId, userId }: { chatId: number; userId: string }) => {
+      const res = await fetch(`/api/chats/${chatId}/members/${userId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Failed to remove member');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.chats.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.chats.get.path] });
+    }
+  });
+}
+
+export function useLeaveGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (chatId: number) => {
+      const res = await fetch(`/api/chats/${chatId}/leave`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Failed to leave group');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.chats.list.path] });
+    }
+  });
+}
+
 // blocking hooks
 export function useBlockUser() {
   const queryClient = useQueryClient();

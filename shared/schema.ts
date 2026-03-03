@@ -52,6 +52,7 @@ export const chatMembers = pgTable("chat_members", {
   userId: varchar("user_id").references(() => users.id, { onDelete: "cascade" }),
   role: varchar("role", { length: 20 }).default('member'), // admin, member
   joinedAt: timestamp("joined_at", { withTimezone: true }).defaultNow(),
+  pinnedAt: timestamp("pinned_at", { withTimezone: true }),
 });
 
 export const messages = pgTable("messages", {

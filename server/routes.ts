@@ -310,6 +310,136 @@ export async function registerRoutes(
     }
   });
 
+  // Pin a chat
+  app.post('/api/chats/:chatId/pin', isAuthenticated, async (req: any, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const userId = req.user.claims.sub;
+      await storage.pinChat(chatId, userId);
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Pin chat error:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Unpin a chat
+  app.post('/api/chats/:chatId/unpin', isAuthenticated, async (req: any, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const userId = req.user.claims.sub;
+      await storage.unpinChat(chatId, userId);
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Unpin chat error:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Create group chat
+  app.post(api.chats.createGroup.path, isAuthenticated, async (req: any, res) => {
+    try {
+      const input = api.chats.createGroup.input.parse(req.body);
+      const currentUserId = req.user.claims.sub;
+      const chat = await storage.createGroupChat(input.name, currentUserId, input.memberIds);
+      res.status(201).json(chat);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      console.error("Create group chat error:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Update group chat (name, avatar)
+  app.patch('/api/chats/:chatId', isAuthenticated, async (req: any, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const userId = req.user.claims.sub;
+      const input = api.chats.updateGroup.input.parse(req.body);
+
+      const chat = await storage.getChat(chatId);
+      if (!chat) return res.status(404).json({ message: "Chat not found" });
+      if (!chat.isGroup) return res.status(400).json({ message: "Not a group chat" });
+      if (!chat.members.some(m => m.userId === userId)) return res.status(401).json({ message: "Unauthorized" });
+
+      const updated = await storage.updateGroupChat(chatId, input);
+      res.json(updated);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      console.error("Update group chat error:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Add members to group chat
+  app.post('/api/chats/:chatId/members', isAuthenticated, async (req: any, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const userId = req.user.claims.sub;
+      const { userIds } = req.body as { userIds: string[] };
+
+      const chat = await storage.getChat(chatId);
+      if (!chat) return res.status(404).json({ message: "Chat not found" });
+      if (!chat.isGroup) return res.status(400).json({ message: "Not a group chat" });
+      if (!chat.members.some(m => m.userId === userId)) return res.status(401).json({ message: "Unauthorized" });
+
+      const updated = await storage.addGroupMembers(chatId, userIds);
+      res.json(updated);
+    } catch (err) {
+      console.error("Add group members error:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Remove member from group chat
+  app.delete('/api/chats/:chatId/members/:userId', isAuthenticated, async (req: any, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const currentUserId = req.user.claims.sub;
+      const targetUserId = req.params.userId;
+
+      const chat = await storage.getChat(chatId);
+      if (!chat) return res.status(404).json({ message: "Chat not found" });
+      if (!chat.isGroup) return res.status(400).json({ message: "Not a group chat" });
+
+      // Only admin can remove others
+      const currentMember = chat.members.find(m => m.userId === currentUserId);
+      if (!currentMember) return res.status(401).json({ message: "Unauthorized" });
+      if (targetUserId !== currentUserId && currentMember.role !== 'admin') {
+        return res.status(403).json({ message: "Only admins can remove members" });
+      }
+
+      await storage.removeGroupMember(chatId, targetUserId);
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Remove group member error:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Leave group chat
+  app.post('/api/chats/:chatId/leave', isAuthenticated, async (req: any, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const userId = req.user.claims.sub;
+
+      const chat = await storage.getChat(chatId);
+      if (!chat) return res.status(404).json({ message: "Chat not found" });
+      if (!chat.isGroup) return res.status(400).json({ message: "Not a group chat" });
+      if (!chat.members.some(m => m.userId === userId)) return res.status(401).json({ message: "Unauthorized" });
+
+      await storage.removeGroupMember(chatId, userId);
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Leave group error:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // Get messages for chat
   app.get('/api/chats/:chatId/messages', isAuthenticated, async (req: any, res) => {
     try {
@@ -448,6 +578,17 @@ export async function registerRoutes(
       }
       
       await storage.markMessagesAsRead(chatId, userId);
+
+      // Broadcast read receipt to other chat members so their UI updates in real-time
+      chat.members.forEach(member => {
+        if (member.userId !== userId) {
+          sendToUser(member.userId!, {
+            type: WS_EVENTS.MESSAGE_READ,
+            payload: { chatId, readByUserId: userId }
+          });
+        }
+      });
+
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ message: "Internal server error" });
@@ -560,7 +701,23 @@ export async function registerRoutes(
       const msgAccess = await storage.verifyMessageAccess(messageId, userId);
       if (!msgAccess) return res.status(403).json({ message: "Forbidden" });
 
+      // Get chat info BEFORE deletion (message may be hard-deleted)
+      const msgChat = forAll ? await storage.getChatByMessageId(messageId) : null;
+
       await storage.deleteMessage(messageId, userId, Boolean(forAll));
+
+      // If forAll, broadcast deletion to other chat members
+      if (forAll && msgChat) {
+        msgChat.members.forEach(member => {
+          if (member.userId !== userId) {
+            sendToUser(member.userId!, {
+              type: WS_EVENTS.MESSAGE_DELETE,
+              payload: { messageIds: [messageId], chatId: msgChat.id }
+            });
+          }
+        });
+      }
+
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ message: "Internal server error" });
@@ -579,7 +736,25 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Maximum 100 messages per batch" });
       }
       const userId = req.user.claims.sub as string;
+
+      // Get chat info BEFORE deletion for broadcasting
+      const forAllIds = items.filter(i => Boolean(i.forAll)).map(i => Number(i.id));
+      const chatForBroadcast = forAllIds.length > 0 ? await storage.getChatByMessageId(forAllIds[0]) : null;
+
       await storage.deleteMessages(items.map(i => ({ id: Number(i.id), forAll: Boolean(i.forAll) })), userId);
+
+      // Broadcast forAll deletions to other chat members
+      if (forAllIds.length > 0 && chatForBroadcast) {
+        chatForBroadcast.members.forEach(member => {
+          if (member.userId !== userId) {
+            sendToUser(member.userId!, {
+              type: WS_EVENTS.MESSAGE_DELETE,
+              payload: { messageIds: forAllIds, chatId: chatForBroadcast.id }
+            });
+          }
+        });
+      }
+
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ message: "Internal server error" });
@@ -631,11 +806,6 @@ export async function registerRoutes(
 
       if (!message) {
         return res.status(404).json({ message: "Message not found" });
-      }
-
-      // Prevent reacting to own messages
-      if (message.senderId === userId) {
-        return res.status(403).json({ message: "You cannot react to your own messages" });
       }
 
       const reaction = await storage.addReaction(messageId, userId, emoji);

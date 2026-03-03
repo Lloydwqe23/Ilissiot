@@ -76,7 +76,7 @@ export function CallOverlay() {
       localVideoRef.current.srcObject = call.localStream;
       localVideoRef.current.play().catch(() => {});
     }
-  }, [call.localStream, call.state, showLocalVideo, showRemoteVideo]);
+  }, [call.localStream, call.state, showLocalVideo, showRemoteVideo, call.isSharingScreen]);
 
   // ── Attach remote video ──────────────────────────────────────────
   useEffect(() => {
@@ -213,6 +213,24 @@ export function CallOverlay() {
                   </div>
                 )}
               </>
+            )}
+
+            {/* Screen share preview when no remote video (sharer sees their own screen) */}
+            {!showRemoteVideo && call.isSharingScreen && call.state === 'connected' && showLocalVideo && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-[1]">
+                <div className="relative w-[80%] max-w-3xl rounded-2xl overflow-hidden border-2 border-white/20 shadow-2xl">
+                  <video
+                    ref={localVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-auto object-contain"
+                  />
+                  <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-sm rounded-full px-4 py-1.5 text-sm text-white/80">
+                    You are sharing your screen
+                  </div>
+                </div>
+              </div>
             )}
 
             {/* ── Center content (avatar, name, status) ── */}

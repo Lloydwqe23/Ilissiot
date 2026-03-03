@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { Link, useRoute, useLocation } from "wouter";
 import { format, isToday, isYesterday } from "date-fns";
-import { Edit, LogOut, Settings, MoreVertical, ArrowLeft, Image, Mic, Video, Phone, FileText, Sticker } from "lucide-react";
+import { Edit, LogOut, Settings, MoreVertical, ArrowLeft, Image, Mic, Video, Phone, FileText, Sticker, Pin, PinOff, LogOut as LeaveIcon, Users } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { useChats, useDeleteChat, useBlockUser, useUnblockUser, useBlockStatus } from "@/hooks/use-chats";
+import { useChats, useDeleteChat, useBlockUser, useUnblockUser, useBlockStatus, usePinChat, useUnpinChat, useLeaveGroup } from "@/hooks/use-chats";
 import { useUserStatus } from "@/hooks/use-user-status";
 import { 
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, 
@@ -69,7 +69,14 @@ function ChatSidebarItem({
   const blockStatus = useBlockStatus(otherUserId);
   const blockMutation = useBlockUser();
   const unblockMutation = useUnblockUser();
+  const pinMutation = usePinChat();
+  const unpinMutation = useUnpinChat();
+  const leaveGroupMutation = useLeaveGroup();
   const [, navigate] = useLocation();
+
+  // Check if this chat is pinned by the current user
+  const myMembership = chat.members?.find((m: any) => m.userId === user?.id);
+  const isPinned = !!myMembership?.pinnedAt;
 
   return (
     <SidebarMenuItem key={chat.id} className="mb-1 relative group">
@@ -88,7 +95,7 @@ function ChatSidebarItem({
           <Avatar className="w-12 h-12 border border-black/5">
             <AvatarImage src={avatarUrl || ""} />
             <AvatarFallback className="text-sm font-medium bg-primary/10 text-primary">
-              {initials}
+              {chat.isGroup ? <Users className="w-5 h-5" /> : initials}
             </AvatarFallback>
           </Avatar>
           <OnlineIndicator userId={otherUserId} />
@@ -100,36 +107,45 @@ function ChatSidebarItem({
               {displayName}
             </span>
             {lastMsg && (
-              <span className="text-[11px] whitespace-nowrap ml-2 text-sidebar-foreground/50 group-hover:text-sidebar-foreground/80">
+              <span className="text-[11px] whitespace-nowrap ml-2 text-sidebar-foreground/50 group-hover:text-sidebar-foreground/80 flex items-center gap-1">
+                {isPinned && <Pin className="w-3 h-3 text-primary/60" />}
                 {formatLastMessageTime(lastMsg.createdAt!)}
               </span>
+            )}
+            {!lastMsg && isPinned && (
+              <span className="ml-2"><Pin className="w-3 h-3 text-primary/60" /></span>
             )}
           </div>
           <div className="flex justify-between items-center">
             <span className="text-[13px] truncate text-sidebar-foreground/60 group-hover:text-sidebar-foreground/80 flex items-center gap-1">
               {lastMsg ? (() => {
                 const prefix = lastMsg.senderId === user?.id ? 'You: ' : '';
-                const attachments: any[] = lastMsg.attachments || [];
+                const attachments: any[] = (lastMsg.attachments || []).filter((a: any) => a.type !== 'reply' && a.type !== 'forward');
+                const hasForward = (lastMsg.attachments || []).some((a: any) => a.type === 'forward');
+                const forwardPrefix = hasForward ? '↗ ' : '';
+                if (lastMsg.content && lastMsg.content.trim()) {
+                  return `${prefix}${forwardPrefix}${lastMsg.content}`;
+                }
                 if (attachments.length > 0) {
                   const first = attachments[0];
                   if (first.type === 'sticker') {
-                    return <>{prefix}<Sticker className="w-3.5 h-3.5 inline" /> Sticker</>;
+                    return <>{prefix}{forwardPrefix}<Sticker className="w-3.5 h-3.5 inline" /> Sticker</>;
                   }
                   if (first.type?.startsWith('call/')) {
                     return <>{prefix}<Phone className="w-3.5 h-3.5 inline" /> Call</>;
                   }
                   if (first.type?.startsWith('image/')) {
-                    return <>{prefix}<Image className="w-3.5 h-3.5 inline" /> Photo</>;
+                    return <>{prefix}{forwardPrefix}<Image className="w-3.5 h-3.5 inline" /> Photo</>;
                   }
                   if (first.type?.startsWith('video/')) {
-                    return <>{prefix}<Video className="w-3.5 h-3.5 inline" /> Video</>;
+                    return <>{prefix}{forwardPrefix}<Video className="w-3.5 h-3.5 inline" /> Video</>;
                   }
                   if (first.type?.startsWith('audio/')) {
-                    return <>{prefix}<Mic className="w-3.5 h-3.5 inline" /> Audio</>;
+                    return <>{prefix}{forwardPrefix}<Mic className="w-3.5 h-3.5 inline" /> Audio</>;
                   }
-                  return <>{prefix}<FileText className="w-3.5 h-3.5 inline" /> {first.name || 'File'}</>;
+                  return <>{prefix}{forwardPrefix}<FileText className="w-3.5 h-3.5 inline" /> {first.name || 'File'}</>;
                 }
-                return `${prefix}${lastMsg.content}`;
+                return `${prefix}${forwardPrefix}Message`;
               })() : 'Started a chat'}
             </span>
             {chat.unreadCount ? (
@@ -143,6 +159,22 @@ function ChatSidebarItem({
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuLabel>Chat</ContextMenuLabel>
+        {isPinned ? (
+          <ContextMenuItem
+            onClick={() => unpinMutation.mutate(chat.id)}
+          >
+            <PinOff className="w-4 h-4 mr-2" />
+            Unpin
+          </ContextMenuItem>
+        ) : (
+          <ContextMenuItem
+            onClick={() => pinMutation.mutate(chat.id)}
+          >
+            <Pin className="w-4 h-4 mr-2" />
+            Pin
+          </ContextMenuItem>
+        )}
+        <ContextMenuSeparator />
         <ContextMenuItem
           onClick={() => {
             if (confirm('Delete this chat? This cannot be undone.')) {
@@ -174,6 +206,25 @@ function ChatSidebarItem({
                 Block user
               </ContextMenuItem>
             )}
+          </>
+        )}
+        {chat.isGroup && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              onClick={() => {
+                if (confirm('Leave this group?')) {
+                  leaveGroupMutation.mutate(chat.id, {
+                    onSuccess: () => {
+                      if (isActive) navigate('/');
+                    }
+                  });
+                }
+              }}
+              className="text-destructive"
+            >
+              Leave group
+            </ContextMenuItem>
           </>
         )}
       </ContextMenuContent>
@@ -285,7 +336,7 @@ export function ChatSidebar() {
               <DropdownMenuLabel className="font-normal">
                 <div className="flex flex-col space-y-1">
                   <p className="text-sm font-medium leading-none">{user?.email}</p>
-                  <p className="text-xs text-muted-foreground leading-none">Local Account</p>
+                  <p className="text-xs text-muted-foreground leading-none">Ilissiot Account</p>
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />

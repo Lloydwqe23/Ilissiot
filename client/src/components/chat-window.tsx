@@ -1,18 +1,20 @@
 import { useEffect, useRef, useState, ReactNode } from "react";
 import { format, isToday, isYesterday } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, CheckCircle2, Smile, Phone, Video, Mic, StopCircle, Ban, Search, Pencil, Check, Play, Pause, Download } from "lucide-react";
+import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, CheckCircle2, Smile, Phone, Video, Mic, StopCircle, Ban, Search, Pencil, Check, Play, Pause, Download, Reply, Share2, FileText, FileSpreadsheet, FileType, File, Presentation, FileArchive, FileCode, Users, UserPlus, UserMinus, Crown } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { useChat, useBlockStatus, useBlockUser, useUnblockUser } from "@/hooks/use-chats";
+import { useChat, useChats, useBlockStatus, useBlockUser, useUnblockUser, useLeaveGroup, useAddGroupMembers, useRemoveGroupMember, useUpdateGroupChat } from "@/hooks/use-chats";
 import { useMessages, useSendMessage, useMarkMessagesRead, useDeleteMessages, useEditMessage, useAddReaction, useRemoveReaction } from "@/hooks/use-messages";
 import { useUserStatus, formatLastSeen } from "@/hooks/use-user-status";
 import { useCall } from "@/hooks/use-call";
+import { useSearchUsers } from "@/hooks/use-users";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger, ContextMenuSeparator } from "@/components/ui/context-menu";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { UserProfileModal } from "@/components/user-profile-modal";
 import { useLocation } from "wouter";
 
@@ -25,6 +27,17 @@ function AudioMessage({ url, name, isMine }: { url: string; name: string; isMine
   const [currentTime, setCurrentTime] = useState(0);
   const [playbackRate, setPlaybackRate] = useState(1);
   const progressRef = useRef<HTMLDivElement>(null);
+
+  // Ensure URL is properly encoded for non-ASCII filenames
+  const audioUrl = (() => {
+    if (url.startsWith('/uploads/')) {
+      const filename = url.slice('/uploads/'.length);
+      // If already encoded (contains %), leave it; otherwise encode
+      if (/%[0-9A-Fa-f]{2}/.test(filename)) return url;
+      return '/uploads/' + encodeURIComponent(decodeURIComponent(filename));
+    }
+    return url;
+  })();
 
   const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 
@@ -51,7 +64,14 @@ function AudioMessage({ url, name, isMine }: { url: string; name: string; isMine
     const audio = audioRef.current;
     if (!audio) return;
     if (playing) { audio.pause(); setPlaying(false); }
-    else { audio.play(); setPlaying(true); }
+    else {
+      audio.play().then(() => {
+        setPlaying(true);
+      }).catch((err) => {
+        console.error('Audio play failed:', err);
+        setPlaying(false);
+      });
+    }
   };
 
   const changeSpeed = (e: React.MouseEvent) => {
@@ -89,7 +109,7 @@ function AudioMessage({ url, name, isMine }: { url: string; name: string; isMine
         : "bg-primary/8 dark:bg-white/8 text-foreground border border-border/40"
       }`}
     >
-      <audio ref={audioRef} src={url} preload="metadata" />
+      <audio ref={audioRef} src={audioUrl} preload="auto" />
 
       {/* Play/Pause */}
       <button
@@ -173,6 +193,49 @@ function AudioMessage({ url, name, isMine }: { url: string; name: string; isMine
   );
 }
 
+/** Return a file-type icon component for the given filename or MIME type. */
+function getFileIcon(fileName: string, mimeType?: string): React.ReactNode {
+  const ext = fileName.split('.').pop()?.toLowerCase() || '';
+  const mime = (mimeType || '').toLowerCase();
+
+  // PDF
+  if (ext === 'pdf' || mime === 'application/pdf') {
+    return <FileText className="w-5 h-5 text-red-500 shrink-0" />;
+  }
+  // Word
+  if (['doc', 'docx'].includes(ext) || mime.includes('wordprocessing') || mime.includes('msword')) {
+    return <FileType className="w-5 h-5 text-blue-600 shrink-0" />;
+  }
+  // Excel
+  if (['xls', 'xlsx', 'csv'].includes(ext) || mime.includes('spreadsheet') || mime.includes('ms-excel')) {
+    return <FileSpreadsheet className="w-5 h-5 text-green-600 shrink-0" />;
+  }
+  // PowerPoint
+  if (['ppt', 'pptx'].includes(ext) || mime.includes('presentation') || mime.includes('powerpoint')) {
+    return <Presentation className="w-5 h-5 text-orange-500 shrink-0" />;
+  }
+  // Archive
+  if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2'].includes(ext) || mime.includes('zip') || mime.includes('archive') || mime.includes('compressed')) {
+    return <FileArchive className="w-5 h-5 text-yellow-600 shrink-0" />;
+  }
+  // Code
+  if (['js', 'ts', 'jsx', 'tsx', 'py', 'java', 'c', 'cpp', 'h', 'cs', 'go', 'rs', 'rb', 'php', 'html', 'css', 'json', 'xml', 'yaml', 'yml', 'sh', 'bat', 'sql'].includes(ext)) {
+    return <FileCode className="w-5 h-5 text-purple-500 shrink-0" />;
+  }
+  // Text
+  if (['txt', 'md', 'rtf', 'log'].includes(ext) || mime.startsWith('text/')) {
+    return <FileText className="w-5 h-5 text-gray-500 shrink-0" />;
+  }
+  // Generic file
+  return <File className="w-5 h-5 text-muted-foreground shrink-0" />;
+}
+
+/** Get a short, friendly file-type label from the filename (extension). */
+function getFileLabel(fileName: string): string {
+  const ext = fileName.split('.').pop()?.toUpperCase();
+  return ext || 'FILE';
+}
+
 /** Turn URLs in text into clickable <a> elements. */
 function linkifyText(text: string): ReactNode[] {
   const urlRegex = /(https?:\/\/[^\s<>"']+)/gi;
@@ -195,6 +258,253 @@ function linkifyText(text: string): ReactNode[] {
   );
 }
 
+/** Group Info Dialog – shows member list with add/remove capabilities */
+function GroupInfoDialog({
+  open,
+  onOpenChange,
+  chat,
+  currentUserId,
+  onViewProfile,
+  addGroupMembers,
+  removeGroupMember,
+  updateGroupChat,
+  leaveGroup,
+  onLeave,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  chat: any;
+  currentUserId: string | undefined;
+  onViewProfile: (user: any) => void;
+  addGroupMembers: any;
+  removeGroupMember: any;
+  updateGroupChat: any;
+  leaveGroup: any;
+  onLeave: () => void;
+}) {
+  const [addMode, setAddMode] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameValue, setNameValue] = useState(chat.name || '');
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const { data: searchResults } = useSearchUsers(searchQuery);
+
+  const myMembership = chat.members?.find((m: any) => m.userId === currentUserId);
+  const isAdmin = myMembership?.role === 'admin';
+  const existingIds = new Set(chat.members?.map((m: any) => m.userId) || []);
+
+  const filteredResults = searchResults?.filter(
+    (u: any) => !existingIds.has(u.id) && u.id !== currentUserId
+  ) || [];
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingAvatar(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/api/upload', { method: 'POST', body: formData, credentials: 'include' });
+      if (!res.ok) throw new Error('Upload failed');
+      const data = await res.json();
+      updateGroupChat.mutate({ chatId: chat.id, name: chat.name, avatarUrl: data.url });
+    } catch (err) {
+      console.error('Failed to upload group avatar:', err);
+      alert('Failed to upload image');
+    } finally {
+      setUploadingAvatar(false);
+      if (avatarInputRef.current) avatarInputRef.current.value = '';
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) { setAddMode(false); setSearchQuery(''); } }}>
+      <DialogContent className="sm:max-w-md max-h-[80vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-3">
+            <input
+              type="file"
+              accept="image/*"
+              ref={avatarInputRef}
+              onChange={handleAvatarUpload}
+              className="hidden"
+            />
+            <button
+              type="button"
+              className="relative group/avatar shrink-0"
+              onClick={() => avatarInputRef.current?.click()}
+              disabled={uploadingAvatar}
+            >
+              <Avatar className="w-12 h-12 border border-border/50">
+                <AvatarImage src={chat.avatarUrl || ''} />
+                <AvatarFallback className="bg-primary/10 text-primary font-medium"><Users className="w-5 h-5" /></AvatarFallback>
+              </Avatar>
+              <div className="absolute inset-0 rounded-full bg-black/40 flex items-center justify-center opacity-0 group-hover/avatar:opacity-100 transition-opacity">
+                {uploadingAvatar ? <Loader2 className="w-4 h-4 text-white animate-spin" /> : <Pencil className="w-4 h-4 text-white" />}
+              </div>
+            </button>
+            <div className="flex-1 min-w-0">
+              {editingName ? (
+                <form
+                  className="flex items-center gap-1"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const trimmed = nameValue.trim();
+                    if (trimmed && trimmed !== chat.name) {
+                      updateGroupChat.mutate({ chatId: chat.id, name: trimmed });
+                    }
+                    setEditingName(false);
+                  }}
+                >
+                  <Input
+                    ref={nameInputRef}
+                    value={nameValue}
+                    onChange={(e) => setNameValue(e.target.value)}
+                    className="h-8 text-base font-semibold"
+                    autoFocus
+                    onBlur={() => {
+                      const trimmed = nameValue.trim();
+                      if (trimmed && trimmed !== chat.name) {
+                        updateGroupChat.mutate({ chatId: chat.id, name: trimmed });
+                      }
+                      setEditingName(false);
+                    }}
+                    onKeyDown={(e) => { if (e.key === 'Escape') { setNameValue(chat.name || ''); setEditingName(false); } }}
+                  />
+                </form>
+              ) : (
+                <button
+                  type="button"
+                  className="flex items-center gap-1.5 group/name hover:opacity-80 transition-opacity text-left"
+                  onClick={() => { setNameValue(chat.name || ''); setEditingName(true); }}
+                  title="Click to rename"
+                >
+                  <span className="text-lg font-semibold truncate">{chat.name || 'Group'}</span>
+                  <Pencil className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover/name:opacity-100 transition-opacity shrink-0" />
+                </button>
+              )}
+              <p className="text-sm text-muted-foreground font-normal">{chat.members?.length || 0} members</p>
+            </div>
+          </DialogTitle>
+          <DialogDescription className="sr-only">Group chat information and member management</DialogDescription>
+        </DialogHeader>
+
+        {/* Add Members Mode */}
+        {addMode ? (
+          <div className="flex flex-col gap-3 flex-1 overflow-hidden">
+            <div className="flex items-center gap-2">
+              <Input
+                placeholder="Search users to add..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                autoFocus
+              />
+              <Button variant="ghost" size="sm" onClick={() => { setAddMode(false); setSearchQuery(''); }}>
+                Cancel
+              </Button>
+            </div>
+            <div className="overflow-y-auto flex-1 space-y-1">
+              {filteredResults.length === 0 && searchQuery.trim() && (
+                <p className="text-sm text-muted-foreground text-center py-4">No users found</p>
+              )}
+              {filteredResults.map((u: any) => (
+                <button
+                  key={u.id}
+                  className="flex items-center gap-3 w-full px-3 py-2 rounded-lg hover:bg-muted/80 transition-colors text-left"
+                  onClick={() => {
+                    addGroupMembers.mutate({ chatId: chat.id, userIds: [u.id] }, {
+                      onSuccess: () => setSearchQuery(''),
+                    });
+                  }}
+                >
+                  <Avatar className="w-8 h-8">
+                    <AvatarImage src={u.profileImageUrl || ''} />
+                    <AvatarFallback className="text-xs bg-primary/10 text-primary">{u.firstName?.[0] || 'U'}</AvatarFallback>
+                  </Avatar>
+                  <span className="text-sm font-medium flex-1 truncate">
+                    {[u.firstName, u.lastName].filter(Boolean).join(' ') || u.email}
+                  </span>
+                  <UserPlus className="w-4 h-4 text-primary shrink-0" />
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          /* Member List */
+          <div className="flex flex-col gap-2 flex-1 overflow-hidden">
+            <div className="flex items-center justify-between px-1">
+              <span className="text-sm font-medium text-muted-foreground">Members</span>
+              <Button variant="ghost" size="sm" className="text-primary gap-1" onClick={() => setAddMode(true)}>
+                <UserPlus className="w-4 h-4" />
+                Add
+              </Button>
+            </div>
+            <div className="overflow-y-auto flex-1 space-y-1">
+              {chat.members?.map((m: any) => {
+                const memberUser = m.user;
+                const memberName = [memberUser?.firstName, memberUser?.lastName].filter(Boolean).join(' ') || memberUser?.email || 'Unknown';
+                const isSelf = m.userId === currentUserId;
+                const memberIsAdmin = m.role === 'admin';
+
+                return (
+                  <div key={m.userId} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/50 transition-colors">
+                    <Avatar
+                      className="w-9 h-9 cursor-pointer hover:opacity-80"
+                      onClick={() => { if (!isSelf && memberUser) { onOpenChange(false); onViewProfile(memberUser); } }}
+                    >
+                      <AvatarImage src={memberUser?.profileImageUrl || ''} />
+                      <AvatarFallback className="text-xs bg-primary/10 text-primary">{memberName[0]}</AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{memberName}{isSelf ? ' (You)' : ''}</p>
+                      {memberIsAdmin && (
+                        <span className="text-[11px] text-primary flex items-center gap-1">
+                          <Crown className="w-3 h-3" /> Admin
+                        </span>
+                      )}
+                    </div>
+                    {isAdmin && !isSelf && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="w-7 h-7 text-muted-foreground hover:text-destructive shrink-0"
+                        onClick={() => {
+                          if (confirm(`Remove ${memberName} from the group?`)) {
+                            removeGroupMember.mutate({ chatId: chat.id, userId: m.userId });
+                          }
+                        }}
+                      >
+                        <UserMinus className="w-4 h-4" />
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Leave group button */}
+            <Button
+              variant="destructive"
+              className="w-full mt-2"
+              onClick={() => {
+                if (confirm('Leave this group? You will no longer receive messages.')) {
+                  leaveGroup.mutate(chat.id, {
+                    onSuccess: () => { onOpenChange(false); onLeave(); }
+                  });
+                }
+              }}
+            >
+              Leave Group
+            </Button>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function ChatWindow({ chatId }: { chatId: number }) {
   const { user } = useAuth();
   const { isMobile } = useSidebar();
@@ -214,10 +524,26 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const [uploading, setUploading] = useState(false);
   const [showStickerPicker, setShowStickerPicker] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(0);
+  const [stickerTab, setStickerTab] = useState<'emoji' | 'gif'>('emoji');
+  const [gifSearchQuery, setGifSearchQuery] = useState('');
+  const [gifResults, setGifResults] = useState<Array<{ id: string; title: string; url: string; preview: string; mp4: string }>>([]);
+  const [gifLoading, setGifLoading] = useState(false);
+  const [gifNextPos, setGifNextPos] = useState<string | null>(null);
   const emojiGridRef = useRef<HTMLDivElement>(null);
+  const stickerPickerRef = useRef<HTMLDivElement>(null);
+  const gifScrollRef = useRef<HTMLDivElement>(null);
 
   // editing state
   const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
+
+  // reply state
+  const [replyToMessage, setReplyToMessage] = useState<{ id: number; senderName: string; content: string; senderId: string } | null>(null);
+
+  // forward state
+  const [forwardMessage, setForwardMessage] = useState<{ id: number; content: string; senderName: string; attachments?: any[] } | null>(null);
+  const [forwardDialogOpen, setForwardDialogOpen] = useState(false);
+  const [forwardSearchQuery, setForwardSearchQuery] = useState('');
+  const { data: allChats } = useChats();
 
   // delete dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -237,8 +563,11 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
 
   // profile modal state
-  const [profileUser, setProfileUser] = useState<typeof user | null>(null);
+  const [profileUser, setProfileUser] = useState<any>(null);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
+
+  // group info dialog state
+  const [groupInfoOpen, setGroupInfoOpen] = useState(false);
 
   // Calculate all text matches in messages (for navigation)
   const allMatches = (() => {
@@ -379,7 +708,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
 
   // helper for rendering attachments of a message
   const renderAttachments = (msg: any, isMine: boolean) => {
-    const files: any[] = msg.attachments || [];
+    const files: any[] = (msg.attachments || []).filter((f: any) => f.type !== 'reply' && f.type !== 'forward');
     if (files.length === 0) return null;
 
     const onlyStickers = files.every(f => f.type === 'sticker');
@@ -431,8 +760,32 @@ export function ChatWindow({ chatId }: { chatId: number }) {
           }
 
           const isImage = file.type.startsWith('image/');
+          const isGif = file.type === 'image/gif';
           const isVideo = file.type.startsWith('video/');
-          const isAudio = file.type.startsWith('audio/');
+          const isGifVideo = isVideo && file.name === 'GIF';
+          const audioExtensions = ['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a', 'wma', 'webm', 'opus'];
+          const fileExt = file.name?.split('.').pop()?.toLowerCase() || '';
+          const isAudio = file.type.startsWith('audio/') || audioExtensions.includes(fileExt);
+
+          // Render GIF images and GIF mp4 videos as looping silent videos
+          if (isGif || isGifVideo) {
+            return (
+              <div key={idx} className="rounded-lg overflow-hidden max-w-xs">
+                <video
+                  src={file.url}
+                  className="max-w-xs max-h-96 rounded-lg"
+                  loop
+                  muted
+                  autoPlay
+                  playsInline
+                  preload="metadata"
+                  disablePictureInPicture
+                  disableRemotePlayback
+                  controlsList="nodownload nofullscreen noremoteplayback noplaybackrate"
+                />
+              </div>
+            );
+          }
 
           if (isImage) {
             return (
@@ -452,16 +805,26 @@ export function ChatWindow({ chatId }: { chatId: number }) {
             return <AudioMessage key={idx} url={file.url} name={file.name} isMine={isMine} />;
           } else {
             return (
-              <a
+              <div
                 key={idx}
-                href={file.url}
-                download={file.name}
-                className="flex items-center gap-2 p-2 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const link = document.createElement('a');
+                  link.href = file.url;
+                  link.download = file.name;
+                  link.click();
+                }}
+                className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 transition-colors cursor-pointer"
               >
+                {getFileIcon(file.name, file.type)}
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium truncate">{file.name}</p>
+                  <p className="text-sm font-medium truncate">{file.name}</p>
+                  <p className={`text-[11px] ${isMine ? 'text-primary-foreground/50' : 'text-muted-foreground'}`}>
+                    {getFileLabel(file.name)}
+                  </p>
                 </div>
-              </a>
+                <Download className={`w-4 h-4 shrink-0 ${isMine ? 'text-primary-foreground/50' : 'text-muted-foreground'}`} />
+              </div>
             );
           }
         })}
@@ -536,6 +899,89 @@ export function ChatWindow({ chatId }: { chatId: number }) {
     }
   }, [editingMessageId]);
 
+  // Close sticker picker on click outside
+  useEffect(() => {
+    if (!showStickerPicker) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (stickerPickerRef.current && !stickerPickerRef.current.contains(e.target as Node)) {
+        setShowStickerPicker(false);
+      }
+    };
+    // Delay adding listener to avoid immediate close
+    const timer = setTimeout(() => {
+      document.addEventListener('mousedown', handleClickOutside);
+    }, 0);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showStickerPicker]);
+
+  // GIF search using Tenor API
+  const fetchGifs = async (query: string, append = false) => {
+    setGifLoading(true);
+    try {
+      const TENOR_KEY = 'AIzaSyAyimkuYQYF_FXVALexPuGQctUWRURdCYQ';
+      let endpoint = query.trim()
+        ? `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(query)}&key=${TENOR_KEY}&limit=20&media_filter=mp4,tinygif,nanogif`
+        : `https://tenor.googleapis.com/v2/featured?key=${TENOR_KEY}&limit=20&media_filter=mp4,tinygif,nanogif`;
+      if (append && gifNextPos) {
+        endpoint += `&pos=${gifNextPos}`;
+      }
+      const res = await fetch(endpoint);
+      if (!res.ok) throw new Error('GIF fetch failed');
+      const data = await res.json();
+      const results = (data.results || []).map((r: any) => ({
+        id: r.id,
+        title: r.title || '',
+        url: r.media_formats?.mp4?.url || r.media_formats?.tinygif?.url || '',
+        preview: r.media_formats?.nanogif?.url || r.media_formats?.tinygif?.url || '',
+        mp4: r.media_formats?.mp4?.url || '',
+      }));
+      setGifNextPos(data.next || null);
+      if (append) {
+        setGifResults(prev => {
+          const existingIds = new Set(prev.map(g => g.id));
+          const newItems = results.filter((r: any) => !existingIds.has(r.id));
+          return [...prev, ...newItems];
+        });
+      } else {
+        setGifResults(results);
+      }
+    } catch (err) {
+      console.error('GIF search error:', err);
+      if (!append) setGifResults([]);
+    } finally {
+      setGifLoading(false);
+    }
+  };
+
+  // Fetch trending GIFs when GIF tab opens
+  useEffect(() => {
+    if (showStickerPicker && stickerTab === 'gif' && gifResults.length === 0 && !gifSearchQuery.trim()) {
+      fetchGifs('');
+    }
+  }, [showStickerPicker, stickerTab]);
+
+  // Debounced GIF search
+  useEffect(() => {
+    if (stickerTab !== 'gif' || !showStickerPicker) return;
+    const timer = setTimeout(() => {
+      setGifNextPos(null);
+      fetchGifs(gifSearchQuery);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [gifSearchQuery]);
+
+  // Infinite scroll for GIFs
+  const handleGifScroll = () => {
+    const el = gifScrollRef.current;
+    if (!el || gifLoading || !gifNextPos) return;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 50) {
+      fetchGifs(gifSearchQuery, true);
+    }
+  };
+
   const handleSend = (e?: React.FormEvent) => {
     e?.preventDefault();
     
@@ -547,14 +993,25 @@ export function ChatWindow({ chatId }: { chatId: number }) {
     
     if (!inputValue.trim() && attachments.length === 0) return;
 
+    // Build attachments with reply info if replying
+    const allAttachments = [...attachments];
+    if (replyToMessage) {
+      allAttachments.push({
+        type: 'reply',
+        name: replyToMessage.senderName,
+        url: JSON.stringify({ messageId: replyToMessage.id, content: replyToMessage.content, senderId: replyToMessage.senderId }),
+      });
+    }
+
     sendMessage.mutate({
       chatId,
       content: inputValue.trim(),
-      attachments: attachments.length > 0 ? attachments : undefined
+      attachments: allAttachments.length > 0 ? allAttachments : undefined
     }, {
       onSuccess: () => {
         setInputValue("");
         setAttachments([]);
+        setReplyToMessage(null);
       }
     });
   };
@@ -730,6 +1187,18 @@ export function ChatWindow({ chatId }: { chatId: number }) {
       console.error("Error deleting chat:", err);
       alert("Failed to delete chat");
     }
+  };
+
+  const leaveGroup = useLeaveGroup();
+  const addGroupMembers = useAddGroupMembers();
+  const removeGroupMember = useRemoveGroupMember();
+  const updateGroupChat = useUpdateGroupChat();
+
+  const handleLeaveGroup = () => {
+    if (!confirm('Leave this group? You will no longer receive messages.')) return;
+    leaveGroup.mutate(chatId, {
+      onSuccess: () => navigate('/'),
+    });
   };
 
   const { data: blockStatus } = useBlockStatus(otherMember?.userId);
@@ -914,22 +1383,26 @@ export function ChatWindow({ chatId }: { chatId: number }) {
               {isMobile && <SidebarTrigger className="mr-1 -ml-2" />}
 
               <Avatar 
-                className={`w-10 h-10 border border-border/50 ${!chat?.isGroup && otherMember ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
+                className={`w-10 h-10 border border-border/50 ${chat?.isGroup || (!chat?.isGroup && otherMember) ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
                 onClick={() => {
-                  if (!chat?.isGroup && otherMember) {
+                  if (chat?.isGroup) {
+                    setGroupInfoOpen(true);
+                  } else if (otherMember) {
                     setProfileUser(otherMember.user);
                     setProfileModalOpen(true);
                   }
                 }}
               >
                 <AvatarImage src={avatarUrl || ""} />
-                <AvatarFallback className="bg-primary/10 text-primary font-medium">{displayName?.[0] || 'U'}</AvatarFallback>
+                <AvatarFallback className="bg-primary/10 text-primary font-medium">{chat?.isGroup ? <Users className="w-5 h-5" /> : (displayName?.[0] || 'U')}</AvatarFallback>
               </Avatar>
 
               <div 
-                className={`flex flex-col ${!chat?.isGroup && otherMember ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
+                className={`flex flex-col ${chat?.isGroup || (!chat?.isGroup && otherMember) ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
                 onClick={() => {
-                  if (!chat?.isGroup && otherMember) {
+                  if (chat?.isGroup) {
+                    setGroupInfoOpen(true);
+                  } else if (otherMember) {
                     setProfileUser(otherMember.user);
                     setProfileModalOpen(true);
                   }
@@ -1015,6 +1488,11 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                       className={blockStatus?.blocked ? undefined : 'text-destructive'}
                     >
                       {blockStatus?.blocked ? 'Unblock user' : 'Block user'}
+                    </DropdownMenuItem>
+                  )}
+                  {chat?.isGroup && (
+                    <DropdownMenuItem onClick={handleLeaveGroup} className="text-destructive">
+                      Leave group
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuSeparator />
@@ -1114,7 +1592,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                 const isCurrentMatch = isSearching && allMatches.length > 0 && allMatches[currentMatchIndex]?.messageId === msg.id;
                 const hasMatch = isSearching && allMatches.some(m => m.messageId === msg.id);
                 const currentMsgDate = new Date(msg.createdAt!);
-                const previousMsgDate = messages[idx - 1]?.createdAt ? new Date(messages[idx - 1].createdAt) : null;
+                const previousMsgDate = messages[idx - 1]?.createdAt ? new Date(String(messages[idx - 1].createdAt)) : null;
                 const showDateDivider = !previousMsgDate || currentMsgDate.toDateString() !== previousMsgDate.toDateString();
                 const dateDividerLabel = isToday(currentMsgDate)
                   ? "Today"
@@ -1182,6 +1660,72 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                       ${isSelected ? 'ring-2 ring-primary/50 scale-[0.98]' : ''}
                       ${isCurrentMatch ? 'ring-2 ring-amber-500 scale-[1.02] shadow-lg shadow-amber-500/30' : hasMatch && isSearching ? 'ring-1 ring-amber-400/50' : ''}
                     `}>
+                      {/* Sender name in group chats */}
+                      {chat?.isGroup && !isMine && showAvatar && (
+                        <p className="text-[12px] font-semibold text-primary mb-1">
+                          {msg.sender?.firstName || 'Unknown'}
+                        </p>
+                      )}
+
+                      {/* Reply preview */}
+                      {msg.attachments && msg.attachments.some((a: any) => a.type === 'reply') && (() => {
+                        const replyAttachment = msg.attachments.find((a: any) => a.type === 'reply');
+                        if (!replyAttachment) return null;
+                        try {
+                          const replyData = JSON.parse(replyAttachment.url);
+                          const repliedMsg = messages?.find(m => m.id === replyData.messageId);
+                          const replyContent = repliedMsg?.content || replyData.content || '';
+                          const replySenderName = repliedMsg
+                            ? (repliedMsg.senderId === user?.id
+                              ? [user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'You'
+                              : repliedMsg.sender?.firstName || 'Unknown')
+                            : replyAttachment.name;
+                          return (
+                            <div
+                              className={`mb-2 px-3 py-1.5 rounded-lg border-l-4 cursor-pointer transition-colors
+                                ${isMine
+                                  ? 'bg-white/10 border-white/40 hover:bg-white/15'
+                                  : 'bg-primary/5 border-primary/40 hover:bg-primary/10'
+                                }`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const el = document.querySelector(`[data-message-id="${replyData.messageId}"]`);
+                                if (el) {
+                                  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                  el.classList.add('ring-2', 'ring-primary/50');
+                                  setTimeout(() => el.classList.remove('ring-2', 'ring-primary/50'), 2000);
+                                }
+                              }}
+                            >
+                              <p className={`text-[11px] font-semibold ${isMine ? 'text-primary-foreground/80' : 'text-primary'}`}>
+                                {replySenderName}
+                              </p>
+                              <p className={`text-[12px] truncate max-w-[200px] ${isMine ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}>
+                                {replyContent || '📎 Attachment'}
+                              </p>
+                            </div>
+                          );
+                        } catch { return null; }
+                      })()}
+
+                      {/* Forwarded message indicator */}
+                      {msg.attachments && msg.attachments.some((a: any) => a.type === 'forward') && (() => {
+                        const forwardAttachment = msg.attachments.find((a: any) => a.type === 'forward');
+                        if (!forwardAttachment) return null;
+                        try {
+                          const forwardData = JSON.parse(forwardAttachment.url);
+                          return (
+                            <div
+                              className={`mb-2 flex items-center gap-1.5 text-[11px] italic
+                                ${isMine ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}
+                            >
+                              <Share2 className="w-3 h-3" />
+                              <span>Forwarded from <span className="font-semibold not-italic">{forwardAttachment.name}</span></span>
+                            </div>
+                          );
+                        } catch { return null; }
+                      })()}
+
                       {msg.content && (() => {
                         const emojiOnly = onlyEmoji(msg.content) && !(msg.attachments && msg.attachments.length);
                         if (emojiOnly) {
@@ -1207,9 +1751,16 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                           {new Date(msg.createdAt!).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })}
                         </span>
                         {isMine && (
-                          <svg className="w-3 h-3 ml-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                          </svg>
+                          msg.isRead ? (
+                            <svg className="w-4 h-4 ml-0.5 text-green-400" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M1 13l4 4L15 7" />
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M8 13l4 4L22 7" />
+                            </svg>
+                          ) : (
+                            <svg className="w-3 h-3 ml-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                            </svg>
+                          )
                         )}
                       </div>
 
@@ -1230,26 +1781,24 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                             return (
                               <button
                                 key={emoji}
-                                disabled={isMine}
                                 onClick={() => {
-                                  if (isMine) return; // Don't allow clicking if own message
                                   if (userReacted) {
                                     handleRemoveReaction(msg.id, emoji);
                                   } else {
                                     handleAddReaction(msg.id, emoji);
                                   }
                                 }}
-                                className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium transition-all ${isMine ? 'cursor-not-allowed' : 'cursor-pointer'}
+                                className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium transition-all cursor-pointer
                                   ${userReacted 
                                     ? isMine 
                                       ? 'bg-primary-foreground/20 text-primary-foreground' 
                                       : 'bg-primary/20 text-primary' 
                                     : isMine
-                                      ? 'bg-foreground/10 text-primary-foreground/70'
+                                      ? 'bg-foreground/10 text-primary-foreground/70 hover:bg-foreground/20'
                                       : 'bg-muted/50 text-muted-foreground hover:bg-muted'
                                   }
                                 `}
-                                title={isMine ? "You cannot react to your own messages" : userIds.map(uid => {
+                                title={userIds.map(uid => {
                                   const u = messages?.find(m => userIds.includes(m.senderId))?.sender;
                                   return u?.firstName || uid;
                                 }).join(', ')}
@@ -1268,13 +1817,43 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                       </ContextMenuTrigger>
                       <ContextMenuContent className="w-48">
                       <ContextMenuItem onClick={() => {
+                        const senderName = isMine
+                          ? [user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'You'
+                          : msg.sender?.firstName || 'Unknown';
+                        setReplyToMessage({
+                          id: msg.id,
+                          senderName,
+                          content: msg.content || (msg.attachments?.length ? '📎 Attachment' : ''),
+                          senderId: msg.senderId,
+                        });
+                        textareaRef.current?.focus();
+                      }}>
+                        <Reply className="w-4 h-4 mr-2" />
+                        Reply
+                      </ContextMenuItem>
+                      <ContextMenuItem onClick={() => {
+                        const senderName = isMine
+                          ? [user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'You'
+                          : msg.sender?.firstName || 'Unknown';
+                        setForwardMessage({
+                          id: msg.id,
+                          content: msg.content || '',
+                          senderName,
+                          attachments: msg.attachments?.filter((a: any) => a.type !== 'reply' && a.type !== 'forward') || [],
+                        });
+                        setForwardSearchQuery('');
+                        setForwardDialogOpen(true);
+                      }}>
+                        <Share2 className="w-4 h-4 mr-2" />
+                        Forward
+                      </ContextMenuItem>
+                      <ContextMenuItem onClick={() => {
                         if (!selectionMode) setSelectionMode(true);
                         toggleMessageSelection(msg.id);
                       }}>
                         <CheckCircle2 className="w-4 h-4 mr-2" />
                         Select
                       </ContextMenuItem>
-                      {!isMine && (
                         <>
                           <ContextMenuSeparator />
                           <ContextMenuSub>
@@ -1316,7 +1895,6 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                             </ContextMenuSubContent>
                           </ContextMenuSub>
                         </>
-                      )}
                       </ContextMenuContent>
                     </ContextMenu>
                   </div>
@@ -1342,6 +1920,25 @@ export function ChatWindow({ chatId }: { chatId: number }) {
           </div>
         ) : (
         <form onSubmit={handleSend} className="max-w-4xl mx-auto space-y-2">
+          {/* Reply indicator */}
+          {replyToMessage && !editingMessageId && (
+            <div className="flex items-center justify-between bg-muted/50 border border-border/50 rounded-lg p-2 px-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <Reply className="w-4 h-4 text-primary shrink-0" />
+                <div className="min-w-0">
+                  <span className="text-sm font-semibold text-primary">{replyToMessage.senderName}</span>
+                  <p className="text-xs text-muted-foreground truncate max-w-[300px]">{replyToMessage.content || '📎 Attachment'}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReplyToMessage(null)}
+                className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
           {/* Editing indicator */}
           {editingMessageId && (
             <div className="flex items-center justify-between bg-muted/50 border border-border/50 rounded-lg p-2 px-3">
@@ -1366,10 +1963,13 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                   {file.type === 'sticker' ? (
                     <span className="text-2xl">{file.name}</span>
                   ) : (
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium truncate text-foreground">{file.name}</p>
-                      <p className="text-xs text-muted-foreground">{file.type.split("/")[1]}</p>
-                    </div>
+                    <>
+                      {getFileIcon(file.name, file.type)}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium truncate text-foreground">{file.name}</p>
+                        <p className="text-xs text-muted-foreground">{getFileLabel(file.name)}</p>
+                      </div>
+                    </>
                   )}
                   <button
                     type="button"
@@ -1401,7 +2001,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
 
             {/* Sticker picker toggle - hidden when editing */}
             {!editingMessageId && (
-            <div className="relative">
+            <div className="relative" ref={stickerPickerRef}>
               <button
                 type="button"
                 onClick={() => setShowStickerPicker(v => !v)}
@@ -1411,49 +2011,139 @@ export function ChatWindow({ chatId }: { chatId: number }) {
               </button>
               {showStickerPicker && (
                 <div className="absolute bottom-full mb-2 right-0 w-[340px] bg-card border border-border/50 rounded-xl shadow-xl z-50 flex flex-col overflow-hidden">
-                  {/* Category name header */}
-                  <div className="px-3 pt-2.5 pb-1">
-                    <span className="text-xs font-semibold text-muted-foreground">{EMOJI_CATEGORIES[selectedCategory].title}</span>
+                  {/* Tab switcher: Emoji | GIF */}
+                  <div className="flex border-b border-border/50">
+                    <button
+                      type="button"
+                      className={`flex-1 py-2 text-center text-sm font-medium transition-colors ${stickerTab === 'emoji' ? 'bg-muted text-foreground border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                      onClick={() => setStickerTab('emoji')}
+                    >
+                      😀 Emoji
+                    </button>
+                    <button
+                      type="button"
+                      className={`flex-1 py-2 text-center text-sm font-medium transition-colors ${stickerTab === 'gif' ? 'bg-muted text-foreground border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                      onClick={() => setStickerTab('gif')}
+                    >
+                      GIF
+                    </button>
                   </div>
-                  {/* emoji grid */}
-                  <div ref={emojiGridRef} className="px-2 pb-1 overflow-y-auto" style={{ height: '220px' }}>
-                    <div className="grid grid-cols-8 gap-0.5">
-                      {EMOJI_CATEGORIES[selectedCategory].items.map((emoji, i) => (
-                        <button
-                          key={`${selectedCategory}-${i}`}
-                          type="button"
-                          className="w-9 h-9 flex items-center justify-center text-[22px] rounded-lg hover:bg-accent transition-colors"
-                          onClick={() => {
-                            setInputValue(prev => prev + emoji);
-                            setShowStickerPicker(false);
-                          }}
-                        >
-                          {emoji}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  {/* category icon bar at bottom */}
-                  <div className="flex items-center justify-around border-t border-border/50 px-1 py-1.5 bg-accent/30">
-                    {EMOJI_CATEGORIES.map((cat, idx) => (
-                      <button
-                        key={cat.title}
-                        type="button"
-                        title={cat.title}
-                        className={`w-8 h-8 flex items-center justify-center text-lg rounded-lg transition-colors ${
-                          selectedCategory === idx
-                            ? 'bg-primary/15 scale-110'
-                            : 'hover:bg-accent opacity-70 hover:opacity-100'
-                        }`}
-                        onClick={() => {
-                          setSelectedCategory(idx);
-                          emojiGridRef.current?.scrollTo(0, 0);
-                        }}
-                      >
-                        {cat.icon}
-                      </button>
-                    ))}
-                  </div>
+
+                  {stickerTab === 'emoji' ? (
+                    <>
+                      {/* Category name header */}
+                      <div className="px-3 pt-2.5 pb-1">
+                        <span className="text-xs font-semibold text-muted-foreground">{EMOJI_CATEGORIES[selectedCategory].title}</span>
+                      </div>
+                      {/* emoji grid */}
+                      <div ref={emojiGridRef} className="px-2 pb-1 overflow-y-auto" style={{ height: '220px' }}>
+                        <div className="grid grid-cols-8 gap-0.5">
+                          {EMOJI_CATEGORIES[selectedCategory].items.map((emoji, i) => (
+                            <button
+                              key={`${selectedCategory}-${i}`}
+                              type="button"
+                              className="w-9 h-9 flex items-center justify-center text-[22px] rounded-lg hover:bg-accent transition-colors"
+                              onClick={() => {
+                                setInputValue(prev => prev + emoji);
+                                setShowStickerPicker(false);
+                              }}
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      {/* category icon bar at bottom */}
+                      <div className="flex items-center justify-around border-t border-border/50 px-1 py-1.5 bg-accent/30">
+                        {EMOJI_CATEGORIES.map((cat, idx) => (
+                          <button
+                            key={cat.title}
+                            type="button"
+                            title={cat.title}
+                            className={`w-8 h-8 flex items-center justify-center text-lg rounded-lg transition-colors ${
+                              selectedCategory === idx
+                                ? 'bg-primary/15 scale-110'
+                                : 'hover:bg-accent opacity-70 hover:opacity-100'
+                            }`}
+                            onClick={() => {
+                              setSelectedCategory(idx);
+                              emojiGridRef.current?.scrollTo(0, 0);
+                            }}
+                          >
+                            {cat.icon}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {/* GIF search input */}
+                      <div className="px-2 pt-2 pb-1">
+                        <input
+                          type="text"
+                          placeholder="Search GIFs..."
+                          value={gifSearchQuery}
+                          onChange={(e) => setGifSearchQuery(e.target.value)}
+                          className="w-full px-3 py-1.5 text-sm bg-muted rounded-lg border-0 outline-none focus:ring-1 focus:ring-primary"
+                          autoFocus
+                        />
+                      </div>
+                      {/* GIF grid */}
+                      <div ref={gifScrollRef} onScroll={handleGifScroll} className="px-2 pb-2 overflow-y-auto" style={{ height: '240px' }}>
+                        {gifResults.length === 0 && gifLoading ? (
+                          <div className="flex items-center justify-center h-full">
+                            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                          </div>
+                        ) : gifResults.length === 0 ? (
+                          <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+                            {gifSearchQuery.trim() ? 'No GIFs found' : 'Search for GIFs'}
+                          </div>
+                        ) : (
+                          <>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            {gifResults.map((gif) => (
+                              <button
+                                key={gif.id}
+                                type="button"
+                                className="rounded-lg overflow-hidden hover:opacity-80 transition-opacity bg-muted relative group"
+                                onClick={() => {
+                                  // Send GIF as mp4 video attachment for performance
+                                  const sendUrl = gif.mp4 || gif.url;
+                                  const sendType = gif.mp4 ? 'video/mp4' : 'image/gif';
+                                  sendMessage.mutate({
+                                    chatId,
+                                    content: '',
+                                    attachments: [{ name: gif.title || 'GIF', url: sendUrl, type: sendType }],
+                                  });
+                                  setShowStickerPicker(false);
+                                  setGifSearchQuery('');
+                                }}
+                              >
+                                <video
+                                  src={gif.mp4 || gif.url}
+                                  className="w-full h-24 object-cover"
+                                  loop
+                                  muted
+                                  autoPlay
+                                  playsInline
+                                  preload="metadata"
+                                  disablePictureInPicture
+                                  disableRemotePlayback
+                                  controlsList="nodownload nofullscreen noremoteplayback noplaybackrate"
+                                />
+                              </button>
+                            ))}
+                          </div>
+                          {gifLoading && (
+                            <div className="flex items-center justify-center py-3">
+                              <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                            </div>
+                          )}
+                          </>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -1498,7 +2188,6 @@ export function ChatWindow({ chatId }: { chatId: number }) {
               multiple
               onChange={handleFileSelect}
               className="hidden"
-              accept="image/*,video/*,audio/*,audio/webm,.pdf,.doc,.docx,.xls,.xlsx"
             />
             )}
 
@@ -1541,7 +2230,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                 : "You can only delete other people's messages for yourself."}
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter className="flex flex-col gap-2 sm:flex-col">
+          <div className="flex flex-col gap-2 mt-2">
             {hasOwnInDelete && (
               <Button
                 variant="destructive"
@@ -1567,7 +2256,116 @@ export function ChatWindow({ chatId }: { chatId: number }) {
             >
               Cancel
             </Button>
-          </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Forward message dialog */}
+      <Dialog open={forwardDialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          setForwardDialogOpen(false);
+          setForwardMessage(null);
+          setForwardSearchQuery('');
+        }
+      }}>
+        <DialogContent className="sm:max-w-md" aria-describedby="forward-dialog-description">
+          <DialogHeader>
+            <DialogTitle>Forward message</DialogTitle>
+            <DialogDescription id="forward-dialog-description">
+              Choose a chat to forward this message to.
+            </DialogDescription>
+          </DialogHeader>
+          {/* Forward message preview */}
+          {forwardMessage && (
+            <div className="px-3 py-2 rounded-lg bg-muted/50 border border-border/50 mb-2">
+              <p className="text-[11px] font-semibold text-primary">{forwardMessage.senderName}</p>
+              <p className="text-sm text-foreground/80 truncate">{forwardMessage.content || '📎 Attachment'}</p>
+            </div>
+          )}
+          {/* Search chats */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search chats..."
+              value={forwardSearchQuery}
+              onChange={(e) => setForwardSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+              autoFocus
+            />
+          </div>
+          {/* Chat list */}
+          <div className="max-h-64 overflow-y-auto space-y-1">
+            {allChats
+              ?.filter((c) => {
+                if (!forwardSearchQuery.trim()) return true;
+                const q = forwardSearchQuery.toLowerCase();
+                const chatName = c.isGroup
+                  ? c.name || 'Group Chat'
+                  : c.members
+                      .filter((m) => m.userId !== user?.id)
+                      .map((m) => [m.user?.firstName, m.user?.lastName].filter(Boolean).join(' '))
+                      .join(', ') || 'Chat';
+                return chatName.toLowerCase().includes(q);
+              })
+              .map((c) => {
+                const chatName = c.isGroup
+                  ? c.name || 'Group Chat'
+                  : c.members
+                      .filter((m) => m.userId !== user?.id)
+                      .map((m) => [m.user?.firstName, m.user?.lastName].filter(Boolean).join(' '))
+                      .join(', ') || 'Chat';
+                const chatAvatar = c.isGroup
+                  ? c.avatarUrl
+                  : c.members.find((m) => m.userId !== user?.id)?.user?.profileImageUrl;
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => {
+                      if (!forwardMessage) return;
+                      // Build forwarded attachments: include the forward tag + original attachments
+                      const fwdAttachments: any[] = [
+                        {
+                          type: 'forward',
+                          name: forwardMessage.senderName,
+                          url: JSON.stringify({ originalMessageId: forwardMessage.id }),
+                        },
+                        ...(forwardMessage.attachments || []),
+                      ];
+                      const targetChatId = c.id;
+                      sendMessage.mutate({
+                        chatId: targetChatId,
+                        content: forwardMessage.content,
+                        attachments: fwdAttachments,
+                      }, {
+                        onSuccess: () => {
+                          // Navigate to the target chat
+                          navigate(`/chat/${targetChatId}`);
+                        },
+                      });
+                      setForwardDialogOpen(false);
+                      setForwardMessage(null);
+                      setForwardSearchQuery('');
+                    }}
+                    className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg hover:bg-muted/80 transition-colors text-left"
+                  >
+                    <Avatar className="w-9 h-9 shrink-0">
+                      <AvatarImage src={chatAvatar || undefined} />
+                      <AvatarFallback className="text-xs bg-primary/10 text-primary">
+                        {chatName.charAt(0).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium truncate">{chatName}</p>
+                    </div>
+                    <Share2 className="w-4 h-4 text-muted-foreground shrink-0" />
+                  </button>
+                );
+              })}
+            {allChats && allChats.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">No chats found</p>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -1593,6 +2391,22 @@ export function ChatWindow({ chatId }: { chatId: number }) {
               setProfileModalOpen(false);
             }
           }}
+        />
+      )}
+
+      {/* Group Info Dialog */}
+      {chat?.isGroup && (
+        <GroupInfoDialog
+          open={groupInfoOpen}
+          onOpenChange={setGroupInfoOpen}
+          chat={chat}
+          currentUserId={user?.id}
+          onViewProfile={(u: any) => { setProfileUser(u); setProfileModalOpen(true); }}
+          addGroupMembers={addGroupMembers}
+          removeGroupMember={removeGroupMember}
+          updateGroupChat={updateGroupChat}
+          leaveGroup={leaveGroup}
+          onLeave={() => navigate('/')}
         />
       )}
     </div>

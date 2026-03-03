@@ -173,7 +173,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[425px] rounded-2xl p-0 overflow-hidden border-border/50 shadow-2xl">
+      <DialogContent className="sm:max-w-[425px] rounded-2xl p-0 overflow-hidden border-border/50 shadow-2xl" aria-describedby={undefined}>
         <DialogHeader className="p-6 bg-muted/30 border-b border-border/50">
           <DialogTitle className="text-2xl font-display">Profile Settings</DialogTitle>
           <div className="mt-2 flex space-x-4">
@@ -261,7 +261,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
                 </div>
                 <div className="space-y-1 flex-1">
                   <h3 className="font-semibold text-lg">{user?.email}</h3>
-                  <p className="text-sm text-muted-foreground">Local Account</p>
+                  <p className="text-sm text-muted-foreground">Ilissiot Account</p>
                   <div className="flex gap-2 mt-2">
                     <Button
                       type="button"
@@ -396,7 +396,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
 
     {/* Image Crop Dialog */}
     <Dialog open={!!cropImageSrc} onOpenChange={(open) => { if (!open) handleCropCancel(); }}>
-      <DialogContent className="sm:max-w-[450px] rounded-2xl p-0 overflow-hidden border-border/50 shadow-2xl">
+      <DialogContent className="sm:max-w-[450px] rounded-2xl p-0 overflow-hidden border-border/50 shadow-2xl" aria-describedby={undefined}>
         <DialogHeader className="p-4 border-b border-border/50">
           <DialogTitle>Crop profile image</DialogTitle>
         </DialogHeader>
@@ -443,7 +443,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
 
     {/* Photo Preview Dialog */}
     <Dialog open={!!previewImageUrl} onOpenChange={(open) => { if (!open) setPreviewImageUrl(null); }}>
-      <DialogContent className="sm:max-w-[600px] rounded-2xl p-0 overflow-hidden border-border/50 shadow-2xl">
+      <DialogContent className="sm:max-w-[600px] rounded-2xl p-0 overflow-hidden border-border/50 shadow-2xl" aria-describedby={undefined}>
         <DialogHeader className="p-4 border-b border-border/50">
           <DialogTitle>Profile Photo</DialogTitle>
         </DialogHeader>

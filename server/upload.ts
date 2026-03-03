@@ -37,35 +37,6 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
-  fileFilter: (req: any, file: any, cb: any) => {
-    // Allow common media and document types
-    const allowedMimes = [
-      "image/jpeg",
-      "image/png",
-      "image/gif",
-      "image/webp",
-      "video/mp4",
-      "video/webm",
-      "audio/mpeg",
-      "audio/wav",
-      "audio/ogg",
-      "audio/flac",
-      "audio/aac",
-      "audio/mp4",
-      "audio/webm",
-      "application/pdf",
-      "application/msword",
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "application/vnd.ms-excel",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    ];
-
-    if (allowedMimes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error("File type not allowed"));
-    }
-  },
 });
 
 export function registerUploadRoutes(app: Express) {
@@ -74,7 +45,7 @@ export function registerUploadRoutes(app: Express) {
       return res.status(400).json({ message: "No file provided" });
     }
 
-    const fileUrl = `/uploads/${req.file.filename}`;
+    const fileUrl = `/uploads/${encodeURIComponent(req.file.filename)}`;
     // Decode filename from latin1 to utf-8 (multer quirk with non-ASCII names)
     const fileName = Buffer.from(req.file.originalname, 'latin1').toString('utf-8');
 

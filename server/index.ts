@@ -48,8 +48,8 @@ app.use('/api/', apiLimiter);
 // Serve static files from public directory (for uploads)
 app.use(express.static(path.join(__dirname, "../public")));
 
-// Set UTF-8 encoding for all responses
-app.use((req, res, next) => {
+// Set UTF-8 encoding for API responses
+app.use('/api', (req, res, next) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   next();
 });

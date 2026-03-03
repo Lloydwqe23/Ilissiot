@@ -110,6 +110,38 @@ export function useChatWebSocket(userId: string | undefined) {
 
           // ── Read receipts ─────────────────────────────────────────
           if (data.type === WS_EVENTS.MESSAGE_READ) {
+            const { chatId, readByUserId } = data.payload;
+
+            // Update messages in the chat: mark all own messages as read
+            const msgKey = [api.messages.list.path, String(chatId)];
+            queryClient.setQueryData<MessageResponse[]>(msgKey, (old) => {
+              if (!old) return old;
+              return old.map(msg =>
+                msg.senderId === userId && !msg.isRead
+                  ? { ...msg, isRead: true }
+                  : msg
+              );
+            });
+
+            // Also update sidebar chat list
+            queryClient.invalidateQueries({
+              queryKey: [api.chats.list.path],
+            });
+          }
+
+          // ── Message deletions ─────────────────────────────────────
+          if (data.type === WS_EVENTS.MESSAGE_DELETE) {
+            const { messageIds, chatId } = data.payload as { messageIds: number[]; chatId: number };
+            const deleteSet = new Set(messageIds);
+
+            // Remove from the open chat's message list
+            const msgKey = [api.messages.list.path, String(chatId)];
+            queryClient.setQueryData<MessageResponse[]>(msgKey, (old) => {
+              if (!old) return old;
+              return old.filter(msg => !deleteSet.has(msg.id));
+            });
+
+            // Refresh sidebar (last message may have changed)
             queryClient.invalidateQueries({
               queryKey: [api.chats.list.path],
             });

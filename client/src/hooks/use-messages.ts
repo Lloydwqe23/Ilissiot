@@ -40,6 +40,8 @@ export function useSendMessage() {
         if (old.some(m => m.id === newMessage.id)) return old;
         return [...old, newMessage];
       });
+      // Invalidate chat list so last message preview updates
+      queryClient.invalidateQueries({ queryKey: [api.chats.list.path] });
     },
   });
 }
