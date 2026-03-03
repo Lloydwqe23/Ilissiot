@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, ReactNode } from "react";
 import { format, isToday, isYesterday } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, CheckCircle2, Smile, Phone, Video, Mic, StopCircle, Ban, Search, Pencil, Check, Play, Pause, Download, Reply, Share2, FileText, FileSpreadsheet, FileType, File, Presentation, FileArchive, FileCode, Users, UserPlus, UserMinus, Crown } from "lucide-react";
+import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, CheckCircle2, Smile, Phone, Video, Mic, StopCircle, Ban, Search, Pencil, Check, Play, Pause, Download, Reply, Share2, FileText, FileSpreadsheet, FileType, File as FileIcon, Presentation, FileArchive, FileCode, Users, UserPlus, UserMinus, Crown, Maximize, ScreenShare } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useChat, useChats, useBlockStatus, useBlockUser, useUnblockUser, useLeaveGroup, useAddGroupMembers, useRemoveGroupMember, useUpdateGroupChat } from "@/hooks/use-chats";
 import { useMessages, useSendMessage, useMarkMessagesRead, useDeleteMessages, useEditMessage, useAddReaction, useRemoveReaction } from "@/hooks/use-messages";
@@ -12,13 +12,204 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent } from "@/components/ui/dropdown-menu";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger, ContextMenuSeparator } from "@/components/ui/context-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { UserProfileModal } from "@/components/user-profile-modal";
 import { useLocation } from "wouter";
 
 /** Audio message component with custom waveform player */
+function VideoMessage({ url, name, isMine }: { url: string; name: string; isMine: boolean }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const [fullscreen, setFullscreen] = useState(false);
+  const progressRef = useRef<HTMLDivElement>(null);
+
+  // Ensure URL is properly encoded for non-ASCII filenames
+  const videoUrl = (() => {
+    if (url.startsWith('/uploads/')) {
+      const filename = url.slice('/uploads/'.length);
+      if (/%[0-9A-Fa-f]{2}/.test(filename)) return url;
+      return '/uploads/' + encodeURIComponent(decodeURIComponent(filename));
+    }
+    return url;
+  })();
+
+  const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const onTimeUpdate = () => {
+      setCurrentTime(video.currentTime);
+      setProgress(video.duration ? (video.currentTime / video.duration) * 100 : 0);
+    };
+    const onLoaded = () => setDuration(video.duration);
+    const onEnded = () => { setPlaying(false); setProgress(0); setCurrentTime(0); };
+    video.addEventListener("timeupdate", onTimeUpdate);
+    video.addEventListener("loadedmetadata", onLoaded);
+    video.addEventListener("ended", onEnded);
+    return () => {
+      video.removeEventListener("timeupdate", onTimeUpdate);
+      video.removeEventListener("loadedmetadata", onLoaded);
+      video.removeEventListener("ended", onEnded);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const fsElement = document.fullscreenElement;
+      setFullscreen(!!fsElement && (fsElement === containerRef.current || fsElement === videoRef.current));
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, []);
+
+  const togglePlay = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (playing) { video.pause(); setPlaying(false); }
+    else {
+      video.play().then(() => {
+        setPlaying(true);
+      }).catch((err) => {
+        console.error('Video play failed:', err);
+        setPlaying(false);
+      });
+    }
+  };
+
+  const changeSpeed = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const video = videoRef.current;
+    if (!video) return;
+    const next = SPEEDS[(SPEEDS.indexOf(playbackRate) + 1) % SPEEDS.length];
+    setPlaybackRate(next);
+    video.playbackRate = next;
+  };
+
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    const video = videoRef.current;
+    const bar = progressRef.current;
+    if (!video || !bar) return;
+    const rect = bar.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    video.currentTime = ratio * video.duration;
+  };
+
+  const toggleFullscreen = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const target = videoRef.current || containerRef.current;
+    if (!target) return;
+
+    try {
+      if (!document.fullscreenElement) {
+        await target.requestFullscreen?.();
+      } else {
+        await document.exitFullscreen?.();
+      }
+    } catch {
+      // noop
+    }
+  };
+
+  const fmt = (s: number) => {
+    if (!s || isNaN(s)) return "0:00";
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m}:${sec.toString().padStart(2, "0")}`;
+  };
+
+  const isActive = playbackRate !== 1;
+
+  return (
+    <div ref={containerRef} className="mt-2 rounded-lg overflow-hidden max-w-sm w-full">
+      {/* Video Player Container */}
+      <div className="relative bg-black/20 rounded-lg overflow-hidden group">
+        <video
+          ref={videoRef}
+          src={videoUrl}
+          preload="metadata"
+          className={`w-full block object-contain ${fullscreen ? 'h-screen max-h-screen bg-black' : 'max-h-96'}`}
+        />
+
+        {/* Play/Pause Overlay */}
+        <button
+          onClick={togglePlay}
+          className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20 hover:bg-black/35"
+        >
+          {playing
+            ? <Pause className="w-12 h-12 fill-white text-white" />
+            : <Play className="w-12 h-12 fill-white text-white translate-x-1" />
+          }
+        </button>
+
+        {/* Controls Bar */}
+        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3 opacity-0 group-hover:opacity-100 transition-opacity">
+          {/* Progress Bar */}
+          <div
+            ref={progressRef}
+            onClick={handleSeek}
+            className="w-full h-1 bg-white/30 rounded-full cursor-pointer mb-2 group/progress hover:h-1.5"
+          >
+            <div
+              className="h-full bg-primary rounded-full transition-all"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+
+          {/* Bottom Controls */}
+          <div className="flex items-center justify-between text-white text-xs">
+            <span className="font-medium tabular-nums">
+              {playing || currentTime > 0 ? fmt(currentTime) : fmt(duration)}
+            </span>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={changeSpeed}
+                className={`px-1.5 py-0.5 rounded font-bold tabular-nums transition-all active:scale-95
+                  ${isActive
+                    ? "bg-primary text-primary-foreground"
+                    : "text-white/70 hover:text-white hover:bg-white/20"
+                  }`}
+                title="Playback speed"
+              >
+                {playbackRate}×
+              </button>
+
+              <button
+                onClick={toggleFullscreen}
+                className="p-1 text-white/70 hover:text-white hover:bg-white/20 rounded transition-all active:scale-95"
+                title="Fullscreen"
+              >
+                <Maximize className="w-4 h-4" />
+              </button>
+
+              <a
+                href={videoUrl}
+                download={name}
+                onClick={(e) => e.stopPropagation()}
+                className="p-1 text-white/70 hover:text-white hover:bg-white/20 rounded transition-all"
+                title="Download"
+              >
+                <Download className="w-4 h-4" />
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AudioMessage({ url, name, isMine }: { url: string; name: string; isMine: boolean }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -227,7 +418,7 @@ function getFileIcon(fileName: string, mimeType?: string): React.ReactNode {
     return <FileText className="w-5 h-5 text-gray-500 shrink-0" />;
   }
   // Generic file
-  return <File className="w-5 h-5 text-muted-foreground shrink-0" />;
+  return <FileIcon className="w-5 h-5 text-muted-foreground shrink-0" />;
 }
 
 /** Get a short, friendly file-type label from the filename (extension). */
@@ -506,6 +697,9 @@ function GroupInfoDialog({
 }
 
 export function ChatWindow({ chatId }: { chatId: number }) {
+  type RecordingType = 'audio' | 'video' | 'screen';
+  type ScreenRecordingOptions = { includeMicrophone: boolean; includeCamera: boolean };
+
   const { user } = useAuth();
   const { isMobile } = useSidebar();
   const [, navigate] = useLocation();
@@ -552,10 +746,13 @@ export function ChatWindow({ chatId }: { chatId: number }) {
 
   // recording state
   const [recording, setRecording] = useState(false);
+  const [recordingType, setRecordingType] = useState<RecordingType | null>(null); // Track recording mode
   const [recordTime, setRecordTime] = useState(0); // ms
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const recordTimerRef = useRef<number | null>(null);
+  const recordingCleanupRef = useRef<(() => void) | null>(null);
 
   // search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -759,13 +956,23 @@ export function ChatWindow({ chatId }: { chatId: number }) {
             }
           }
 
-          const isImage = file.type.startsWith('image/');
-          const isGif = file.type === 'image/gif';
-          const isVideo = file.type.startsWith('video/');
-          const isGifVideo = isVideo && file.name === 'GIF';
-          const audioExtensions = ['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a', 'wma', 'webm', 'opus'];
           const fileExt = file.name?.split('.').pop()?.toLowerCase() || '';
-          const isAudio = file.type.startsWith('audio/') || audioExtensions.includes(fileExt);
+          const mimeType: string = (file.type || '').toLowerCase();
+
+          const videoExtensions = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'm4v', '3gp', 'ogv'];
+          const audioExtensions = ['mp3', 'wav', 'flac', 'aac', 'm4a', 'wma', 'opus', 'ogg'];
+
+          // Recorded audio is saved as "audio-<timestamp>.webm" — honour that name over extension
+          const isRecordedAudio = file.name?.startsWith('audio-') && fileExt === 'webm';
+          const isRecordedVideo = file.name?.startsWith('video-') && fileExt === 'webm';
+
+          const isGifVideo = !isRecordedAudio && (mimeType.startsWith('video/') || videoExtensions.includes(fileExt)) && file.name === 'GIF';
+          const isGif     = mimeType === 'image/gif' || fileExt === 'gif';
+          const isImage   = !isGif && !isGifVideo && !isRecordedAudio && !isRecordedVideo && (mimeType.startsWith('image/') || ['png','jpg','jpeg','webp','bmp','svg'].includes(fileExt));
+          const isVideo   = !isGif && !isGifVideo && !isRecordedAudio && (isRecordedVideo || mimeType.startsWith('video/') || videoExtensions.includes(fileExt));
+          const isAudio   = !isVideo && (isRecordedAudio || mimeType.startsWith('audio/') || audioExtensions.includes(fileExt));
+          
+          console.log(`[File Detection] name: ${file.name}, type: ${file.type}, ext: ${fileExt}, isVideo: ${isVideo}, isAudio: ${isAudio}`);
 
           // Render GIF images and GIF mp4 videos as looping silent videos
           if (isGif || isGifVideo) {
@@ -800,7 +1007,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
               </a>
             );
           } else if (isVideo) {
-            return <video key={idx} src={file.url} controls className="max-w-xs rounded-lg" />;
+            return <VideoMessage key={idx} url={file.url} name={file.name} isMine={isMine} />;
           } else if (isAudio) {
             return <AudioMessage key={idx} url={file.url} name={file.name} isMine={isMine} />;
           } else {
@@ -856,6 +1063,10 @@ export function ChatWindow({ chatId }: { chatId: number }) {
       }
       if (recordTimerRef.current) {
         clearInterval(recordTimerRef.current);
+      }
+      if (recordingCleanupRef.current) {
+        recordingCleanupRef.current();
+        recordingCleanupRef.current = null;
       }
     };
   }, []);
@@ -1046,41 +1257,303 @@ export function ChatWindow({ chatId }: { chatId: number }) {
     }
   };
 
-  const startRecording = async () => {
+  const buildScreenCompositeStream = async (
+    displayStream: MediaStream,
+    micStream: MediaStream | null,
+    cameraStream: MediaStream | null,
+    includeCamera: boolean,
+  ): Promise<{ stream: MediaStream; cleanup: () => void }> => {
+    const cleanupFns: Array<() => void> = [];
+
+    const displayAudioTracks = displayStream.getAudioTracks();
+    const micAudioTracks = micStream?.getAudioTracks() || [];
+
+    let mixedAudioTrack: MediaStreamTrack | null = null;
+    if (displayAudioTracks.length > 0 || micAudioTracks.length > 0) {
+      const audioCtx = new AudioContext();
+      const destination = audioCtx.createMediaStreamDestination();
+
+      if (displayAudioTracks.length > 0) {
+        const displayAudioSource = audioCtx.createMediaStreamSource(new MediaStream([displayAudioTracks[0]]));
+        displayAudioSource.connect(destination);
+      }
+
+      if (micAudioTracks.length > 0) {
+        const micAudioSource = audioCtx.createMediaStreamSource(new MediaStream([micAudioTracks[0]]));
+        micAudioSource.connect(destination);
+      }
+
+      mixedAudioTrack = destination.stream.getAudioTracks()[0] || null;
+      cleanupFns.push(() => {
+        try { audioCtx.close(); } catch {}
+      });
+    }
+
+    if (!includeCamera || !cameraStream?.getVideoTracks().length) {
+      const composed = new MediaStream();
+      const displayVideoTrack = displayStream.getVideoTracks()[0];
+      if (displayVideoTrack) composed.addTrack(displayVideoTrack);
+      if (mixedAudioTrack) composed.addTrack(mixedAudioTrack);
+      return {
+        stream: composed,
+        cleanup: () => { cleanupFns.forEach(fn => fn()); },
+      };
+    }
+
+    const screenVideo = document.createElement('video');
+    screenVideo.srcObject = displayStream;
+    screenVideo.muted = true;
+    screenVideo.playsInline = true;
+
+    const cameraVideo = document.createElement('video');
+    cameraVideo.srcObject = cameraStream;
+    cameraVideo.muted = true;
+    cameraVideo.playsInline = true;
+
+    await Promise.all([
+      screenVideo.play().catch(() => {}),
+      cameraVideo.play().catch(() => {}),
+    ]);
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const sourceW = screenVideo.videoWidth || 1280;
+    const sourceH = screenVideo.videoHeight || 720;
+    const maxW = 960;
+    const scale = Math.min(1, maxW / sourceW);
+    const width = Math.max(640, Math.floor(sourceW * scale));
+    const height = Math.max(360, Math.floor(sourceH * scale));
+    canvas.width = width;
+    canvas.height = height;
+
+    let intervalId: number | null = null;
+    const draw = () => {
+      if (!ctx) return;
+      ctx.clearRect(0, 0, width, height);
+
+      const screenW = screenVideo.videoWidth || width;
+      const screenH = screenVideo.videoHeight || height;
+      const screenScale = Math.min(width / screenW, height / screenH);
+      const drawW = screenW * screenScale;
+      const drawH = screenH * screenScale;
+      const drawX = (width - drawW) / 2;
+      const drawY = (height - drawH) / 2;
+
+      ctx.fillStyle = 'black';
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(screenVideo, drawX, drawY, drawW, drawH);
+
+      const camW = Math.floor(width * 0.22);
+      const camH = Math.floor(camW * 9 / 16);
+      const camX = width - camW - 20;
+      const camY = height - camH - 20;
+
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fillRect(camX - 4, camY - 4, camW + 8, camH + 8);
+      ctx.drawImage(cameraVideo, camX, camY, camW, camH);
+
+    };
+
+    draw();
+
+    intervalId = window.setInterval(draw, 1000 / 20);
+
+    const canvasStream = canvas.captureStream(24);
+    const composed = new MediaStream();
+    const composedVideoTrack = canvasStream.getVideoTracks()[0];
+    if (composedVideoTrack) composed.addTrack(composedVideoTrack);
+    if (mixedAudioTrack) composed.addTrack(mixedAudioTrack);
+
+    cleanupFns.push(() => {
+      if (intervalId) clearInterval(intervalId);
+      canvasStream.getTracks().forEach(t => t.stop());
+      screenVideo.pause();
+      cameraVideo.pause();
+      screenVideo.srcObject = null;
+      cameraVideo.srcObject = null;
+    });
+
+    return {
+      stream: composed,
+      cleanup: () => { cleanupFns.forEach(fn => fn()); },
+    };
+  };
+
+  const startRecording = async (type: RecordingType = 'audio', screenOptions?: ScreenRecordingOptions) => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      let stream: MediaStream;
+      let displayStream: MediaStream | null = null;
+      let micStream: MediaStream | null = null;
+      let cameraStream: MediaStream | null = null;
+
+      if (recordingCleanupRef.current) {
+        recordingCleanupRef.current();
+        recordingCleanupRef.current = null;
+      }
+
+      if (type === 'screen') {
+        const includeMicrophone = !!screenOptions?.includeMicrophone;
+        const includeCamera = !!screenOptions?.includeCamera;
+
+        displayStream = await navigator.mediaDevices.getDisplayMedia({
+          video: { frameRate: { ideal: 24, max: 30 } },
+          audio: true,
+        }).catch(async () => {
+          return navigator.mediaDevices.getDisplayMedia({
+            video: { frameRate: { ideal: 24, max: 30 } },
+            audio: false,
+          });
+        });
+
+        if (includeMicrophone) {
+          micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        }
+
+        if (includeCamera) {
+          cameraStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 640 }, height: { ideal: 360 }, facingMode: 'user' },
+          });
+        }
+
+        const composed = await buildScreenCompositeStream(
+          displayStream,
+          micStream,
+          cameraStream,
+          includeCamera,
+        );
+        stream = composed.stream;
+        recordingCleanupRef.current = () => {
+          composed.cleanup();
+          displayStream?.getTracks().forEach(t => t.stop());
+          micStream?.getTracks().forEach(t => t.stop());
+          cameraStream?.getTracks().forEach(t => t.stop());
+        };
+      } else {
+        const constraints = type === 'audio'
+          ? { audio: true }
+          : { audio: true, video: { width: { ideal: 1280 }, height: { ideal: 720 } } };
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      }
+
+      streamRef.current = stream;
+      
+      // Check what tracks we actually got
+      const videoTracks = stream.getVideoTracks();
+      const audioTracks = stream.getAudioTracks();
+      console.log(`[Recording] Video tracks: ${videoTracks.length}, Audio tracks: ${audioTracks.length}`);
+      
+      // Determine MIME type and options
+      let mimeType = 'video/webm';
+      let options: MediaRecorderOptions = {};
+      
+      if (type === 'audio') {
+        mimeType = 'audio/webm';
+        options = { mimeType: 'audio/webm' };
+      } else {
+        // For video, try to use a supported video codec
+        const possibleTypes = [
+          { mimeType: 'video/webm;codecs=vp9,opus', description: 'VP9+Opus' },
+          { mimeType: 'video/webm;codecs=vp8,opus', description: 'VP8+Opus' },
+          { mimeType: 'video/webm', description: 'WebM (auto)' }
+        ];
+        
+        for (const type of possibleTypes) {
+          if (MediaRecorder.isTypeSupported(type.mimeType)) {
+            mimeType = type.mimeType;
+            options = { mimeType };
+            console.log(`[Recording] Using MIME type: ${type.description}`);
+            break;
+          }
+        }
+
+        if (type === 'screen') {
+          options.videoBitsPerSecond = 2_500_000;
+        }
+      }
+      
+      console.log(`[Recording] MediaRecorder type: ${mimeType}`);
+      const recorder = new MediaRecorder(stream, options);
       recordedChunksRef.current = [];
+
+      if (type === 'screen') {
+        const screenTrack = displayStream?.getVideoTracks()[0] || stream.getVideoTracks()[0];
+        if (screenTrack) {
+          screenTrack.onended = () => {
+            if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+              mediaRecorderRef.current.stop();
+            }
+          };
+        }
+      }
 
       recorder.ondataavailable = (ev: BlobEvent) => {
         if (ev.data && ev.data.size > 0) {
+          console.log(`[Recording] Data available: ${ev.data.size} bytes, type: ${ev.data.type}`);
           recordedChunksRef.current.push(ev.data);
         }
       };
 
       recorder.onstop = async () => {
+        console.log('[Recording] onstop handler called');
         // stop timer
         if (recordTimerRef.current) {
           clearInterval(recordTimerRef.current);
           recordTimerRef.current = null;
         }
         setRecording(false);
+        setRecordingType(null);
         setRecordTime(0);
 
-        // stop the stream tracks so microphone is released
+        // stop the stream tracks so camera/microphone are released
         stream.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+        if (recordingCleanupRef.current) {
+          recordingCleanupRef.current();
+          recordingCleanupRef.current = null;
+        }
 
-        const blob = new Blob(recordedChunksRef.current, { type: recordedChunksRef.current[0]?.type || 'audio/webm' });
-        if (blob.size === 0) return;
+        console.log(`[Recording] Chunks collected: ${recordedChunksRef.current.length}`);
+        const finalMimeType = recordedChunksRef.current[0]?.type || mimeType;
+        const blob = new Blob(recordedChunksRef.current, { type: finalMimeType });
+        console.log(`[Recording] Blob size: ${blob.size} bytes, MIME: ${finalMimeType}`);
+        
+        if (blob.size === 0) {
+          console.error('[Recording] Recording is empty');
+          alert('Recording is empty. Please try again.');
+          return;
+        }
 
         // create file and upload
-        const file = new File([blob], `voice-${Date.now()}.webm`, { type: blob.type });
-        await uploadAndSendAudio(file);
+        const ext = type === 'audio' ? 'webm' : 'webm';
+        const file = new File([blob], `${type}-${Date.now()}.${ext}`, { type: finalMimeType });
+        console.log(`[Recording] File created: ${file.name}, MIME: ${file.type}, preparing to upload`);
+        console.log(`[Recording] Current chatId: ${chatId}`);
+        try {
+          await uploadAndSendMedia(file);
+          console.log('[Recording] Upload and send completed');
+        } catch (error) {
+          console.error('[Recording] Upload and send failed:', error);
+          alert(`Failed to send: ${(error as any)?.message || 'Unknown error'}`);
+        }
+      };
+
+      recorder.onerror = (ev: MediaRecorderErrorEvent) => {
+        console.error('Recording error:', ev.error);
+        alert(`Recording error: ${ev.error}`);
+        setRecording(false);
+        setRecordingType(null);
+        stream.getTracks().forEach(t => t.stop());
+        if (recordingCleanupRef.current) {
+          recordingCleanupRef.current();
+          recordingCleanupRef.current = null;
+        }
       };
 
       recorder.start();
       mediaRecorderRef.current = recorder;
       setRecording(true);
+      setRecordingType(type);
+      
       // simple timer
       const start = Date.now();
       recordTimerRef.current = window.setInterval(() => {
@@ -1088,13 +1561,23 @@ export function ChatWindow({ chatId }: { chatId: number }) {
       }, 250);
     } catch (err) {
       console.error("Recording failed", err);
-      alert("Unable to access microphone");
+      const sourceName = type === 'audio' ? 'microphone' : type === 'video' ? 'camera/microphone' : 'screen';
+      alert(`Unable to access ${sourceName}: ${(err as any)?.message}`);
     }
   };
 
   const stopRecording = () => {
-    mediaRecorderRef.current?.stop();
-    mediaRecorderRef.current = null;
+    console.log('[Recording] Stop button clicked');
+    if (!mediaRecorderRef.current) {
+      console.error('[Recording] No media recorder active');
+      return;
+    }
+    try {
+      mediaRecorderRef.current.stop();
+      console.log('[Recording] Stop called on recorder, waiting for onstop event...');
+    } catch (err) {
+      console.error('[Recording] Error stopping recorder:', err);
+    }
   };
 
   const formatRecordTime = (ms: number) => {
@@ -1104,22 +1587,47 @@ export function ChatWindow({ chatId }: { chatId: number }) {
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  const uploadAndSendAudio = async (file: File) => {
+  const uploadAndSendMedia = async (file: File) => {
+    console.log(`[Upload] Starting upload for file: ${file.name}`);
     setUploading(true);
     try {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch('/api/upload', { method: 'POST', body: formData });
-      if (!response.ok) throw new Error('Upload failed');
+      console.log('[Upload] Sending to /api/upload...');
+      const response = await fetch('/api/upload', { method: 'POST', body: formData, credentials: 'include' });
+      console.log(`[Upload] Response status: ${response.status}`);
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `Upload failed with status ${response.status}`);
+      }
+      
       const data = await response.json();
+      console.log(`[Upload] Upload successful, got URL: ${data.url}`);
+      console.log(`[Upload] Sending message to chatId: ${chatId}`);
+      
       const attachment = { name: data.name, url: data.url, type: data.type };
-      // send message immediately
-      sendMessage.mutate({ chatId, content: '', attachments: [attachment] });
+      
+      // send message immediately - return promise to track completion
+      return new Promise((resolve, reject) => {
+        sendMessage.mutate({ chatId, content: '', attachments: [attachment] }, {
+          onSuccess: () => {
+            console.log('[Upload] Message sent successfully');
+            recordedChunksRef.current = [];
+            resolve(undefined);
+          },
+          onError: (err) => {
+            console.error('[Upload] Send message error:', err);
+            reject(err);
+          }
+        });
+      });
     } catch (err) {
-      console.error('Upload error:', err);
-      alert('Failed to upload audio');
+      console.error('[Upload] Error:', err);
+      throw err;
     } finally {
+      console.log('[Upload] Setting uploading to false');
       setUploading(false);
     }
   };
@@ -2149,24 +2657,65 @@ export function ChatWindow({ chatId }: { chatId: number }) {
             </div>
             )}
 
-            {/* Record audio button - hidden when editing */}
+            {/* Unified record button with mode picker - hidden when editing */}
             {!editingMessageId && (
-            <button
-              type="button"
-              onClick={() => { recording ? stopRecording() : startRecording(); }}
-              disabled={uploading}
-              className="h-12 w-12 rounded-full shrink-0 flex items-center justify-center bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors disabled:opacity-50 relative"
-              title={recording ? 'Stop recording' : 'Record voice message'}
-            >
-              {recording ? (
-                <StopCircle className="w-5 h-5 text-red-500" />
+              recording ? (
+                <button
+                  type="button"
+                  onClick={stopRecording}
+                  disabled={uploading}
+                  className="h-12 w-12 rounded-full shrink-0 flex items-center justify-center bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed relative"
+                  title="Stop recording"
+                >
+                  <StopCircle className="w-5 h-5 text-red-500" />
+                  <span className="absolute -top-1 -right-1 bg-red-500 rounded-full w-2 h-2 animate-pulse" />
+                </button>
               ) : (
-                <Mic className="w-5 h-5" />
-              )}
-              {recording && (
-                <span className="absolute -top-1 -right-1 bg-red-500 rounded-full w-2 h-2 animate-pulse" />
-              )}
-            </button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      disabled={uploading}
+                      className="h-12 w-12 rounded-full shrink-0 flex items-center justify-center bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Record message"
+                    >
+                      <Video className="w-5 h-5" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52">
+                    <DropdownMenuLabel>Record message</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => startRecording('audio')} className="gap-2">
+                      <Mic className="w-4 h-4" />
+                      Audio message
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => startRecording('video')} className="gap-2">
+                      <Video className="w-4 h-4" />
+                      Video message
+                    </DropdownMenuItem>
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger className="gap-2">
+                        <ScreenShare className="w-4 h-4" />
+                        Screen recording
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="w-56">
+                        <DropdownMenuItem onClick={() => startRecording('screen', { includeMicrophone: false, includeCamera: false })}>
+                          Screen only
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => startRecording('screen', { includeMicrophone: true, includeCamera: false })}>
+                          Screen + voice
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => startRecording('screen', { includeMicrophone: false, includeCamera: true })}>
+                          Screen + camera
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => startRecording('screen', { includeMicrophone: true, includeCamera: true })}>
+                          Screen + voice + camera
+                        </DropdownMenuItem>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )
             )}
 
             {/* File upload button - hidden when editing */}
