@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import { AuthPage } from "@/pages/auth-page";
 import { ChatLayout } from "@/pages/chat-layout";
+import { InviteLinkPage } from "@/pages/invite-link-page";
 import { useAuth } from "@/hooks/use-auth";
 import { CallProvider } from "@/hooks/use-call";
 import { CallOverlay } from "@/components/call-overlay";
@@ -25,16 +26,19 @@ function RootRouter() {
     );
   }
 
-  if (!isAuthenticated) {
-    return <AuthPage />;
-  }
-
-  // If authenticated, any route matches the ChatLayout which handles internal view based on URL params
+  // Invite link route is accessible without authentication
   return (
     <Switch>
-      <Route path="/" component={ChatLayout} />
-      <Route path="/chat/:id" component={ChatLayout} />
-      <Route component={NotFound} />
+      <Route path="/invite/:token" component={InviteLinkPage} />
+      {!isAuthenticated ? (
+        <Route component={AuthPage} />
+      ) : (
+        <>
+          <Route path="/" component={ChatLayout} />
+          <Route path="/chat/:id" component={ChatLayout} />
+          <Route component={NotFound} />
+        </>
+      )}
     </Switch>
   );
 }

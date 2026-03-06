@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, boolean, varchar, index, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, boolean, varchar, index, jsonb, integer } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -94,6 +94,70 @@ export const blocks = pgTable("blocks", {
 
 export type Block = typeof blocks.$inferSelect;
 
+// Pinned messages - track which messages are pinned in a chat
+export const pinnedMessages = pgTable("pinned_messages", {
+  id: serial("id").primaryKey(),
+  chatId: integer("chat_id").references(() => chats.id, { onDelete: "cascade" }).notNull(),
+  messageId: integer("message_id").references(() => messages.id, { onDelete: "cascade" }).notNull(),
+  pinnedBy: varchar("pinned_by").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  pinnedAt: timestamp("pinned_at", { withTimezone: true }).defaultNow(),
+}, (table) => [
+  index("IDX_chat_pinned").on(table.chatId),
+]);
+
+export type PinnedMessage = typeof pinnedMessages.$inferSelect;
+
+// Group invite links - for joining groups via links
+export const groupInviteLinks = pgTable("group_invite_links", {
+  id: serial("id").primaryKey(),
+  chatId: integer("chat_id").references(() => chats.id, { onDelete: "cascade" }).notNull(),
+  token: varchar("token").unique().notNull(), // unique invite code
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }), // null = never expires
+  maxUses: integer("max_uses"), // null = unlimited
+  currentUses: integer("current_uses").notNull().default(0),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+}, (table) => [
+  index("IDX_invite_token").on(table.token),
+  index("IDX_invite_chat").on(table.chatId),
+]);
+
+export type GroupInviteLink = typeof groupInviteLinks.$inferSelect;
+
+// Polls - for group chats only
+export const polls = pgTable("polls", {
+  id: serial("id").primaryKey(),
+  chatId: integer("chat_id").references(() => chats.id, { onDelete: "cascade" }).notNull(),
+  messageId: integer("message_id").references(() => messages.id, { onDelete: "cascade" }).notNull(), // poll is sent as a message
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  question: text("question").notNull(),
+  options: jsonb("options").notNull(), // Array of {id: number, text: string}
+  allowMultipleAnswers: boolean("allow_multiple_answers").default(false),
+  isAnonymous: boolean("is_anonymous").default(false),
+  isClosed: boolean("is_closed").default(false),
+  closesAt: timestamp("closes_at", { withTimezone: true }), // null = manual close
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+}, (table) => [
+  index("IDX_poll_chat").on(table.chatId),
+  index("IDX_poll_message").on(table.messageId),
+]);
+
+export type Poll = typeof polls.$inferSelect;
+
+// Poll votes
+export const pollVotes = pgTable("poll_votes", {
+  id: serial("id").primaryKey(),
+  pollId: integer("poll_id").references(() => polls.id, { onDelete: "cascade" }).notNull(),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  optionId: integer("option_id").notNull(), // references option id in poll.options
+  votedAt: timestamp("voted_at", { withTimezone: true }).defaultNow(),
+}, (table) => [
+  index("IDX_poll_user_option").on(table.pollId, table.userId, table.optionId),
+]);
+
+export type PollVote = typeof pollVotes.$inferSelect;
+
 export const usersRelations = relations(users, ({ many }) => ({
   memberships: many(chatMembers),
   messages: many(messages),
@@ -106,6 +170,9 @@ export const usersRelations = relations(users, ({ many }) => ({
 export const chatsRelations = relations(chats, ({ many }) => ({
   members: many(chatMembers),
   messages: many(messages),
+  pinnedMessages: many(pinnedMessages),
+  inviteLinks: many(groupInviteLinks),
+  polls: many(polls),
 }));
 
 export const chatMembersRelations = relations(chatMembers, ({ one }) => ({
@@ -117,11 +184,36 @@ export const messagesRelations = relations(messages, ({ one, many }) => ({
   chat: one(chats, { fields: [messages.chatId], references: [chats.id] }),
   sender: one(users, { fields: [messages.senderId], references: [users.id] }),
   reactions: many(messageReactions),
+  pinnedMessages: many(pinnedMessages),
+  poll: one(polls, { fields: [messages.id], references: [polls.messageId] }),
 }));
 
 export const messageReactionsRelations = relations(messageReactions, ({ one }) => ({
   message: one(messages, { fields: [messageReactions.messageId], references: [messages.id] }),
   user: one(users, { fields: [messageReactions.userId], references: [users.id] }),
+}));
+
+export const pinnedMessagesRelations = relations(pinnedMessages, ({ one }) => ({
+  chat: one(chats, { fields: [pinnedMessages.chatId], references: [chats.id] }),
+  message: one(messages, { fields: [pinnedMessages.messageId], references: [messages.id] }),
+  pinnedByUser: one(users, { fields: [pinnedMessages.pinnedBy], references: [users.id] }),
+}));
+
+export const groupInviteLinksRelations = relations(groupInviteLinks, ({ one }) => ({
+  chat: one(chats, { fields: [groupInviteLinks.chatId], references: [chats.id] }),
+  creator: one(users, { fields: [groupInviteLinks.createdBy], references: [users.id] }),
+}));
+
+export const pollsRelations = relations(polls, ({ one, many }) => ({
+  chat: one(chats, { fields: [polls.chatId], references: [chats.id] }),
+  message: one(messages, { fields: [polls.messageId], references: [messages.id] }),
+  creator: one(users, { fields: [polls.createdBy], references: [users.id] }),
+  votes: many(pollVotes),
+}));
+
+export const pollVotesRelations = relations(pollVotes, ({ one }) => ({
+  poll: one(polls, { fields: [pollVotes.pollId], references: [polls.id] }),
+  user: one(users, { fields: [pollVotes.userId], references: [users.id] }),
 }));
 
 // --- SCHEMAS ---
@@ -147,6 +239,7 @@ export type ChatWithMembers = Chat & {
 
 export type MessageWithSender = Message & {
   sender: User;
+  poll?: PollWithResults | null;
 };
 
 export type ReactionWithUser = MessageReaction & {
@@ -164,6 +257,36 @@ export type ReactionGroup = {
   userReacted: boolean;
 };
 
+// Poll option structure
+export type PollOption = {
+  id: number;
+  text: string;
+};
+
+// Poll with vote counts and user's vote (if any)
+export type PollWithResults = Poll & {
+  options: PollOption[];
+  results: {
+    optionId: number;
+    count: number;
+    voters?: User[]; // Only if not anonymous
+  }[];
+  userVotes?: number[]; // option IDs the current user voted for
+  totalVotes: number;
+};
+
+// Pinned message with full message data
+export type PinnedMessageWithDetails = PinnedMessage & {
+  message: MessageWithSender;
+  pinnedByUser: User;
+};
+
+// Invite link with optional chat info
+export type InviteLinkWithChat = GroupInviteLink & {
+  chat?: ChatWithMembers;
+  creator?: User;
+};
+
 // WebSocket Event Types
 export const WS_EVENTS = {
   CONNECT: 'connect',
@@ -173,10 +296,16 @@ export const WS_EVENTS = {
   MESSAGE_READ: 'message:read',
   MESSAGE_REACTION_ADD: 'message:reaction:add',
   MESSAGE_REACTION_REMOVE: 'message:reaction:remove',
+  MESSAGE_PIN: 'message:pin',
+  MESSAGE_UNPIN: 'message:unpin',
   USER_STATUS: 'user:status',
   ONLINE_USERS: 'users:online',
   TYPING_START: 'typing:start',
   TYPING_STOP: 'typing:stop',
+  // Polls
+  POLL_NEW: 'poll:new',
+  POLL_VOTE: 'poll:vote',
+  POLL_CLOSE: 'poll:close',
   // WebRTC Call Signaling
   CALL_OFFER: 'call:offer',
   CALL_ANSWER: 'call:answer',

@@ -242,6 +242,16 @@ export function useChatWebSocket(userId: string | undefined) {
             });
           }
 
+          // ── Poll Events ────────────────────────────────────────
+          if (data.type === WS_EVENTS.POLL_NEW || data.type === WS_EVENTS.POLL_VOTE || data.type === WS_EVENTS.POLL_CLOSE) {
+            const { chatId } = data.payload;
+            
+            // Invalidate messages for this chat to refetch with updated poll data
+            queryClient.invalidateQueries({
+              queryKey: [api.messages.list.path, String(chatId)],
+            });
+          }
+
         } catch (err) {
           console.error('[WS] Parse error:', err);
         }

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, ReactNode } from "react";
 import { format, isToday, isYesterday } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, CheckCircle2, Smile, Phone, Video, Mic, StopCircle, Ban, Search, Pencil, Check, Play, Pause, Download, Reply, Share2, FileText, FileSpreadsheet, FileType, File as FileIcon, Presentation, FileArchive, FileCode, Users, UserPlus, UserMinus, Crown, Maximize, ScreenShare } from "lucide-react";
+import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, CheckCircle2, Smile, Phone, Video, Mic, StopCircle, Ban, Search, Pencil, Check, Play, Pause, Download, Reply, Share2, FileText, FileSpreadsheet, FileType, File as FileIcon, Presentation, FileArchive, FileCode, Users, UserPlus, UserMinus, Crown, Maximize, ScreenShare, Pin, BarChart3, Link2 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { useChat, useChats, useBlockStatus, useBlockUser, useUnblockUser, useLeaveGroup, useAddGroupMembers, useRemoveGroupMember, useUpdateGroupChat } from "@/hooks/use-chats";
+import { useChat, useChats, useBlockStatus, useBlockUser, useUnblockUser, useLeaveGroup, useAddGroupMembers, useRemoveGroupMember, useUpdateGroupChat, usePinMessage, useUnpinMessage } from "@/hooks/use-chats";
 import { useMessages, useSendMessage, useMarkMessagesRead, useDeleteMessages, useEditMessage, useAddReaction, useRemoveReaction } from "@/hooks/use-messages";
 import { useUserStatus, formatLastSeen } from "@/hooks/use-user-status";
 import { useCall } from "@/hooks/use-call";
@@ -16,6 +16,10 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger, ContextMenuSeparator } from "@/components/ui/context-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { UserProfileModal } from "@/components/user-profile-modal";
+import { PinnedMessagesBar } from "@/components/pinned-messages-bar";
+import { CreatePollDialog } from "@/components/create-poll-dialog";
+import { GroupInviteLinksDialog } from "@/components/group-invite-links-dialog";
+import { PollMessage } from "@/components/poll-message";
 import { useLocation } from "wouter";
 
 /** Audio message component with custom waveform player */
@@ -765,6 +769,16 @@ export function ChatWindow({ chatId }: { chatId: number }) {
 
   // group info dialog state
   const [groupInfoOpen, setGroupInfoOpen] = useState(false);
+
+  // poll dialog state
+  const [createPollOpen, setCreatePollOpen] = useState(false);
+
+  // invite links dialog state
+  const [inviteLinksOpen, setInviteLinksOpen] = useState(false);
+
+  // pin message mutation
+  const pinMessage = usePinMessage();
+  const unpinMessage = useUnpinMessage();
 
   // Calculate all text matches in messages (for navigation)
   const allMatches = (() => {
@@ -1987,6 +2001,21 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                 <DropdownMenuContent align="end">
                   <DropdownMenuLabel>Chat Options</DropdownMenuLabel>
                   <DropdownMenuSeparator />
+                  {chat?.isGroup && (
+                    <>
+                      <DropdownMenuItem onClick={() => setCreatePollOpen(true)}>
+                        <BarChart3 className="w-4 h-4 mr-2" />
+                        Create Poll
+                      </DropdownMenuItem>
+                      {chat?.members.find(m => m.userId === user?.id)?.role === 'admin' && (
+                        <DropdownMenuItem onClick={() => setInviteLinksOpen(true)}>
+                          <Link2 className="w-4 h-4 mr-2" />
+                          Invite Links
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuSeparator />
+                    </>
+                  )}
                   <DropdownMenuItem onClick={() => handleClearHistoryForMe()}>Clear history for me</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => handleClearHistoryForAll()}>Clear history for everyone</DropdownMenuItem>
                   <DropdownMenuSeparator />
@@ -2082,6 +2111,19 @@ export function ChatWindow({ chatId }: { chatId: number }) {
           </Button>
         </div>
       )}
+
+      {/* Pinned Messages Bar */}
+      <PinnedMessagesBar
+        chatId={chatId}
+        currentUserId={user?.id}
+        isAdmin={chat?.members.find(m => m.userId === user?.id)?.role === 'admin'}
+        onNavigateToMessage={(messageId) => {
+          const element = document.querySelector(`[data-message-id="${messageId}"]`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }}
+      />
 
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 scrollbar-hide flex flex-col">
@@ -2234,7 +2276,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                         } catch { return null; }
                       })()}
 
-                      {msg.content && (() => {
+                      {msg.content && !(msg as any).poll && (() => {
                         const emojiOnly = onlyEmoji(msg.content) && !(msg.attachments && msg.attachments.length);
                         if (emojiOnly) {
                           return (
@@ -2250,6 +2292,18 @@ export function ChatWindow({ chatId }: { chatId: number }) {
 
                       {/* Attachments */}
                       {renderAttachments(msg, isMine)}
+
+                      {/* Poll */}
+                      {(msg as any).poll && (
+                        <div className="mt-2">
+                          <PollMessage
+                            poll={(msg as any).poll}
+                            currentUserId={user?.id}
+                            isCreator={isMine}
+                            isAdmin={chat?.members.find(m => m.userId === user?.id)?.role === 'admin'}
+                          />
+                        </div>
+                      )}
 
                       <div className={`flex items-center justify-end gap-1 mt-1 ${isMine ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
                         {msg.isEdited && (
@@ -2355,6 +2409,15 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                         <Share2 className="w-4 h-4 mr-2" />
                         Forward
                       </ContextMenuItem>
+                      {/* Only show Pin for admins in group chats or all users in direct chats */}
+                      {(!chat?.isGroup || chat?.members.find(m => m.userId === user?.id)?.role === 'admin') && (
+                        <ContextMenuItem onClick={() => {
+                          pinMessage.mutate({ chatId, messageId: msg.id });
+                        }}>
+                          <Pin className="w-4 h-4 mr-2" />
+                          Pin Message
+                        </ContextMenuItem>
+                      )}
                       <ContextMenuItem onClick={() => {
                         if (!selectionMode) setSelectionMode(true);
                         toggleMessageSelection(msg.id);
@@ -2956,6 +3019,24 @@ export function ChatWindow({ chatId }: { chatId: number }) {
           updateGroupChat={updateGroupChat}
           leaveGroup={leaveGroup}
           onLeave={() => navigate('/')}
+        />
+      )}
+
+      {/* Create Poll Dialog */}
+      {chat?.isGroup && (
+        <CreatePollDialog
+          open={createPollOpen}
+          onOpenChange={setCreatePollOpen}
+          chatId={chatId}
+        />
+      )}
+
+      {/* Group Invite Links Dialog */}
+      {chat?.isGroup && (
+        <GroupInviteLinksDialog
+          open={inviteLinksOpen}
+          onOpenChange={setInviteLinksOpen}
+          chatId={chatId}
         />
       )}
     </div>

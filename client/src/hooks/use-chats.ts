@@ -262,3 +262,275 @@ export function useBlockedUsers() {
     },
   });
 }
+
+// ═══════════════════════════════════════════════════════════════
+// PINNED MESSAGES HOOKS
+// ═══════════════════════════════════════════════════════════════
+
+export function usePinnedMessages(chatId: number | null) {
+  return useQuery({
+    queryKey: ['pinned-messages', chatId],
+    queryFn: async () => {
+      if (!chatId) return [];
+      const res = await fetch(`/api/chats/${chatId}/pinned-messages`, {
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Failed to fetch pinned messages');
+      return await res.json();
+    },
+    enabled: !!chatId,
+  });
+}
+
+export function usePinMessage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ chatId, messageId }: { chatId: number; messageId: number }) => {
+      const res = await fetch(`/api/chats/${chatId}/messages/${messageId}/pin`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to pin message');
+      }
+      return await res.json();
+    },
+    onSuccess: (_, { chatId }) => {
+      queryClient.invalidateQueries({ queryKey: ['pinned-messages', chatId] });
+    },
+  });
+}
+
+export function useUnpinMessage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ chatId, messageId }: { chatId: number; messageId: number }) => {
+      const res = await fetch(`/api/chats/${chatId}/messages/${messageId}/pin`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to unpin message');
+      }
+      return await res.json();
+    },
+    onSuccess: (_, { chatId }) => {
+      queryClient.invalidateQueries({ queryKey: ['pinned-messages', chatId] });
+    },
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GROUP INVITE LINKS HOOKS
+// ═══════════════════════════════════════════════════════════════
+
+export function useInviteLinks(chatId: number | null) {
+  return useQuery({
+    queryKey: ['invite-links', chatId],
+    queryFn: async () => {
+      if (!chatId) return [];
+      const res = await fetch(`/api/chats/${chatId}/invite-links`, {
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Failed to fetch invite links');
+      return await res.json();
+    },
+    enabled: !!chatId,
+  });
+}
+
+export function useCreateInviteLink() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ 
+      chatId, 
+      expiresAt, 
+      maxUses 
+    }: { 
+      chatId: number; 
+      expiresAt?: string; 
+      maxUses?: number;
+    }) => {
+      const res = await fetch(`/api/chats/${chatId}/invite-links`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expiresAt, maxUses }),
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to create invite link');
+      }
+      return await res.json();
+    },
+    onSuccess: (_, { chatId }) => {
+      queryClient.invalidateQueries({ queryKey: ['invite-links', chatId] });
+    },
+  });
+}
+
+export function useRevokeInviteLink() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (token: string) => {
+      const res = await fetch(`/api/invite-links/${token}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to revoke invite link');
+      }
+      return await res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invite-links'] });
+    },
+  });
+}
+
+export function useJoinViaInviteLink() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (token: string) => {
+      const res = await fetch(`/api/invite-links/${token}/join`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to join group');
+      }
+      return await res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.chats.list.path] });
+    },
+  });
+}
+
+export function useInviteLinkInfo(token: string | null) {
+  return useQuery({
+    queryKey: ['invite-link-info', token],
+    queryFn: async () => {
+      if (!token) return null;
+      const res = await fetch(`/api/invite-links/${token}/info`);
+      if (!res.ok) return null;
+      return await res.json();
+    },
+    enabled: !!token,
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// POLLS HOOKS
+// ═══════════════════════════════════════════════════════════════
+
+export function useCreatePoll() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      chatId,
+      question,
+      options,
+      allowMultipleAnswers,
+      isAnonymous,
+      closesAt,
+    }: {
+      chatId: number;
+      question: string;
+      options: string[];
+      allowMultipleAnswers?: boolean;
+      isAnonymous?: boolean;
+      closesAt?: string;
+    }) => {
+      const res = await fetch(`/api/chats/${chatId}/polls`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question,
+          options,
+          allowMultipleAnswers,
+          isAnonymous,
+          closesAt,
+        }),
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to create poll');
+      }
+      return await res.json();
+    },
+    onSuccess: (_, { chatId }) => {
+      queryClient.invalidateQueries({ queryKey: ['messages', chatId] });
+    },
+  });
+}
+
+export function useVotePoll() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      pollId,
+      optionIds,
+    }: {
+      pollId: number;
+      optionIds: number[];
+    }) => {
+      const res = await fetch(`/api/polls/${pollId}/vote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ optionIds }),
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to vote');
+      }
+      return await res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['poll', data.id] });
+      queryClient.invalidateQueries({ queryKey: ['messages', data.chatId] });
+    },
+  });
+}
+
+export function useClosePoll() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (pollId: number) => {
+      const res = await fetch(`/api/polls/${pollId}/close`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to close poll');
+      }
+      return await res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['poll', data.id] });
+      queryClient.invalidateQueries({ queryKey: ['messages', data.chatId] });
+    },
+  });
+}
+
+export function usePoll(pollId: number | null) {
+  return useQuery({
+    queryKey: ['poll', pollId],
+    queryFn: async () => {
+      if (!pollId) return null;
+      const res = await fetch(`/api/polls/${pollId}`, {
+        credentials: 'include',
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    },
+    enabled: !!pollId,
+  });
+}

@@ -6,14 +6,23 @@ import {
   messageReactions,
   users,
   blocks,
+  pinnedMessages,
+  groupInviteLinks,
+  polls,
+  pollVotes,
   type User,
   type ChatWithMembers,
   type MessageWithSender,
   type ReactionWithUser,
   type InsertChat,
   type InsertMessage,
+  type PinnedMessageWithDetails,
+  type PollWithResults,
+  type PollOption,
+  type GroupInviteLink,
 } from "@shared/schema";
-import { eq, or, and, desc, asc, ilike, sql, inArray } from "drizzle-orm";
+import { eq, or, and, desc, asc, ilike, sql, inArray, gte } from "drizzle-orm";
+import { randomBytes } from "crypto";
 
 /** Strip ALL private fields from a user object so other users never see them.
  * Returns `any` intentionally – the type system's `User` includes these fields
@@ -396,17 +405,19 @@ export class DatabaseStorage implements IStorage {
     const msgs = await db
       .select({
         message: messages,
-        sender: users
+        sender: users,
+        poll: polls,
       })
       .from(messages)
       .innerJoin(users, eq(messages.senderId, users.id))
+      .leftJoin(polls, eq(polls.messageId, messages.id))
       .where(eq(messages.chatId, chatId))
       .orderBy(desc(messages.createdAt))
       .limit(limit);
 
     // Reverse to get chronological order (oldest first) for UI
     // Filter out messages deleted for this user
-    return msgs
+    const filteredMessages = msgs
       .filter(m => {
         let deletedBy = m.message.deletedBy as any;
         if (deletedBy && typeof deletedBy === 'string') {
@@ -419,7 +430,11 @@ export class DatabaseStorage implements IStorage {
         if (!deletedBy || !Array.isArray(deletedBy)) return true;
         return !deletedBy.includes(userId);
       })
-      .map(m => {
+      .reverse();
+
+    // For messages with polls, fetch the poll results
+    const messagesWithPolls = await Promise.all(
+      filteredMessages.map(async (m) => {
         const msg = m.message;
         // normalize createdAt to Date
         const created: Date | null = msg.createdAt
@@ -427,13 +442,27 @@ export class DatabaseStorage implements IStorage {
             ? msg.createdAt
             : new Date(msg.createdAt as any)
           : null;
+
+        let pollData = null;
+        const pollId = m.poll?.id ?? null;
+        if (pollId !== null && pollId !== undefined) {
+          try {
+            pollData = await this.getPollResults(pollId, userId);
+          } catch (err) {
+            console.error('Error fetching poll results:', err);
+          }
+        }
+
         return {
           ...msg,
           createdAt: created,
           sender: sanitizeUser(m.sender),
+          poll: pollData,
         };
       })
-      .reverse();
+    );
+
+    return messagesWithPolls;
   }
 
   async searchMessagesInChat(chatId: number, query: string, userId: string, limit = 50): Promise<MessageWithSender[]> {
@@ -806,6 +835,541 @@ export class DatabaseStorage implements IStorage {
       .update(chats)
       .set({ hiddenBy })
       .where(eq(chats.id, chatId));
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // PINNED MESSAGES
+  // ═══════════════════════════════════════════════════════════════
+
+  async pinMessage(chatId: number, messageId: number, userId: string): Promise<PinnedMessageWithDetails> {
+    // Verify chat exists and user is a member
+    const chat = await this.getChat(chatId);
+    if (!chat) throw new Error('Chat not found');
+    
+    const member = chat.members.find(m => m.userId === userId);
+    if (!member) throw new Error('Not a chat member');
+    
+    // In group chats, only admins can pin
+    if (chat.isGroup && member.role !== 'admin') {
+      throw new Error('Only admins can pin messages in groups');
+    }
+    
+    // Verify message exists and belongs to this chat
+    const [message] = await db
+      .select()
+      .from(messages)
+      .innerJoin(users, eq(messages.senderId, users.id))
+      .where(eq(messages.id, messageId))
+      .limit(1);
+    
+    if (!message || message.messages.chatId !== chatId) {
+      throw new Error('Message not found');
+    }
+    
+    // Check if already pinned
+    const existing = await db
+      .select()
+      .from(pinnedMessages)
+      .where(
+        and(
+          eq(pinnedMessages.chatId, chatId),
+          eq(pinnedMessages.messageId, messageId)
+        )
+      )
+      .limit(1);
+    
+    if (existing.length > 0) {
+      // Already pinned, just return it with details
+      const [pinnedUser] = await db.select().from(users).where(eq(users.id, existing[0].pinnedBy)).limit(1);
+      return {
+        ...existing[0],
+        message: {
+          ...message.messages,
+          sender: sanitizeUser(message.users),
+        },
+        pinnedByUser: sanitizeUser(pinnedUser),
+      };
+    }
+    
+    // Pin the message
+    const [pinned] = await db
+      .insert(pinnedMessages)
+      .values({
+        chatId,
+        messageId,
+        pinnedBy: userId,
+      })
+      .returning();
+    
+    const [pinnedUser] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    
+    return {
+      ...pinned,
+      message: {
+        ...message.messages,
+        sender: sanitizeUser(message.users),
+      },
+      pinnedByUser: sanitizeUser(pinnedUser),
+    };
+  }
+
+  async unpinMessage(chatId: number, messageId: number, userId: string): Promise<void> {
+    // Verify chat exists and user is a member
+    const chat = await this.getChat(chatId);
+    if (!chat) throw new Error('Chat not found');
+    
+    const member = chat.members.find(m => m.userId === userId);
+    if (!member) throw new Error('Not a chat member');
+    
+    // In group chats, only admins can unpin
+    if (chat.isGroup && member.role !== 'admin') {
+      throw new Error('Only admins can unpin messages in groups');
+    }
+    
+    // Delete the pinned message
+    const result = await db
+      .delete(pinnedMessages)
+      .where(
+        and(
+          eq(pinnedMessages.chatId, chatId),
+          eq(pinnedMessages.messageId, messageId)
+        )
+      )
+      .returning();
+    
+    if (result.length === 0) {
+      throw new Error('Pinned message not found');
+    }
+  }
+
+  async getPinnedMessages(chatId: number, userId: string): Promise<PinnedMessageWithDetails[]> {
+    // Verify user is a member
+    const chat = await this.getChat(chatId);
+    if (!chat) throw new Error('Chat not found');
+    
+    const member = chat.members.find(m => m.userId === userId);
+    if (!member) throw new Error('Not a chat member');
+    
+    // Get pinned messages with full details
+    const pinned = await db
+      .select()
+      .from(pinnedMessages)
+      .innerJoin(messages, eq(pinnedMessages.messageId, messages.id))
+      .innerJoin(users, eq(messages.senderId, users.id))
+      .where(eq(pinnedMessages.chatId, chatId))
+      .orderBy(desc(pinnedMessages.pinnedAt));
+    
+    const results: PinnedMessageWithDetails[] = [];
+    for (const p of pinned) {
+      const [pinnedByUser] = await db.select().from(users).where(eq(users.id, p.pinned_messages.pinnedBy)).limit(1);
+      results.push({
+        ...p.pinned_messages,
+        message: {
+          ...p.messages,
+          sender: sanitizeUser(p.users),
+        },
+        pinnedByUser: sanitizeUser(pinnedByUser),
+      });
+    }
+    
+    return results;
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // GROUP INVITE LINKS
+  // ═══════════════════════════════════════════════════════════════
+
+  async createInviteLink(
+    chatId: number,
+    userId: string,
+    expiresAt?: Date,
+    maxUses?: number
+  ): Promise<GroupInviteLink> {
+    // Verify chat exists and is a group
+    const chat = await this.getChat(chatId);
+    if (!chat) throw new Error('Chat not found');
+    if (!chat.isGroup) throw new Error('Not a group chat');
+    
+    // Verify user is an admin
+    const member = chat.members.find(m => m.userId === userId);
+    if (!member || member.role !== 'admin') {
+      throw new Error('Only admins can create invite links');
+    }
+    
+    // Generate unique token
+    const token = randomBytes(16).toString('hex');
+    
+    const [inviteLink] = await db
+      .insert(groupInviteLinks)
+      .values({
+        chatId,
+        token,
+        createdBy: userId,
+        expiresAt,
+        maxUses: maxUses ?? null,
+        currentUses: 0,
+        isActive: true,
+      })
+      .returning();
+    
+    return inviteLink;
+  }
+
+  async getInviteLinks(chatId: number, userId: string): Promise<GroupInviteLink[]> {
+    // Verify user is a member
+    const chat = await this.getChat(chatId);
+    if (!chat) throw new Error('Chat not found');
+    
+    const member = chat.members.find(m => m.userId === userId);
+    if (!member) throw new Error('Not a chat member');
+    
+    const links = await db
+      .select()
+      .from(groupInviteLinks)
+      .where(eq(groupInviteLinks.chatId, chatId))
+      .orderBy(desc(groupInviteLinks.createdAt));
+    
+    return links;
+  }
+
+  async revokeInviteLink(token: string, userId: string): Promise<void> {
+    const [link] = await db
+      .select()
+      .from(groupInviteLinks)
+      .where(eq(groupInviteLinks.token, token))
+      .limit(1);
+    
+    if (!link) throw new Error('Invite link not found');
+    
+    // Verify user is an admin of the chat
+    const chat = await this.getChat(link.chatId);
+    if (!chat) throw new Error('Chat not found');
+    
+    const member = chat.members.find(m => m.userId === userId);
+    if (!member || member.role !== 'admin') {
+      throw new Error('Only admins can revoke invite links');
+    }
+    
+    // Deactivate the link
+    await db
+      .update(groupInviteLinks)
+      .set({ isActive: false })
+      .where(eq(groupInviteLinks.token, token));
+  }
+
+  async joinViaInviteLink(token: string, userId: string): Promise<ChatWithMembers> {
+    const [link] = await db
+      .select()
+      .from(groupInviteLinks)
+      .where(eq(groupInviteLinks.token, token))
+      .limit(1);
+    
+    if (!link) throw new Error('Invite link not found');
+    if (!link.isActive) throw new Error('Invite link is not active');
+    if (link.expiresAt && new Date(link.expiresAt) < new Date()) {
+      throw new Error('Invite link expired');
+    }
+    if (link.maxUses && link.currentUses >= link.maxUses) {
+      throw new Error('Invite link has reached maximum uses');
+    }
+    
+    const chat = await this.getChat(link.chatId);
+    if (!chat) throw new Error('Chat not found');
+    
+    // Check if already a member
+    const existingMember = chat.members.find(m => m.userId === userId);
+    if (existingMember) {
+      throw new Error('Already a member of this group');
+    }
+    
+    // Add user to the group
+    await db.insert(chatMembers).values({
+      chatId: link.chatId,
+      userId,
+      role: 'member',
+    });
+    
+    // Increment uses count
+    await db
+      .update(groupInviteLinks)
+      .set({ currentUses: link.currentUses + 1 })
+      .where(eq(groupInviteLinks.token, token));
+    
+    // Return updated chat
+    return (await this.getChat(link.chatId))!;
+  }
+
+  async getInviteLinkInfo(token: string): Promise<{ chatName: string; chatAvatar: string | null; memberCount: number }> {
+    const [link] = await db
+      .select()
+      .from(groupInviteLinks)
+      .where(eq(groupInviteLinks.token, token))
+      .limit(1);
+    
+    if (!link) throw new Error('Invite link not found');
+    if (!link.isActive) throw new Error('Invite link is not active');
+    if (link.expiresAt && new Date(link.expiresAt) < new Date()) {
+      throw new Error('Invite link expired');
+    }
+    
+    const chat = await this.getChat(link.chatId);
+    if (!chat) throw new Error('Chat not found');
+    
+    return {
+      chatName: chat.name || 'Group',
+      chatAvatar: chat.avatarUrl,
+      memberCount: chat.members.length,
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // POLLS
+  // ═══════════════════════════════════════════════════════════════
+
+  private normalizePollOptions(rawOptions: unknown): PollOption[] {
+    let parsed: unknown = rawOptions;
+
+    if (typeof parsed === 'string') {
+      try {
+        parsed = JSON.parse(parsed);
+      } catch {
+        return [];
+      }
+    }
+
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .map((item, index) => {
+        if (typeof item === 'string') {
+          return {
+            id: index,
+            text: item,
+          };
+        }
+
+        if (item && typeof item === 'object') {
+          const option = item as { id?: unknown; text?: unknown };
+          const normalizedText = typeof option.text === 'string' ? option.text : '';
+          const normalizedId = typeof option.id === 'number' ? option.id : index;
+
+          if (!normalizedText) return null;
+
+          return {
+            id: normalizedId,
+            text: normalizedText,
+          };
+        }
+
+        return null;
+      })
+      .filter((option): option is PollOption => option !== null);
+  }
+
+  async createPoll(
+    chatId: number,
+    userId: string,
+    question: string,
+    options: string[],
+    allowMultipleAnswers?: boolean,
+    isAnonymous?: boolean,
+    closesAt?: Date
+  ): Promise<PollWithResults> {
+    // Verify chat exists and is a group
+    const chat = await this.getChat(chatId);
+    if (!chat) throw new Error('Chat not found');
+    if (!chat.isGroup) throw new Error('Not a group chat');
+    
+    // Verify user is a member
+    const member = chat.members.find(m => m.userId === userId);
+    if (!member) throw new Error('Not a chat member');
+    
+    // Create poll options
+    const pollOptions: PollOption[] = options.map((text, index) => ({
+      id: index,
+      text,
+    }));
+    
+    // Create a message for the poll
+    const pollMessage = await this.createMessage({
+      chatId,
+      senderId: userId,
+      content: `📊 Poll: ${question}`,
+      attachments: [],
+    });
+    
+    // Create the poll
+    const [poll] = await db
+      .insert(polls)
+      .values({
+        chatId,
+        messageId: pollMessage.id,
+        createdBy: userId,
+        question,
+        options: pollOptions as any,
+        allowMultipleAnswers: allowMultipleAnswers ?? false,
+        isAnonymous: isAnonymous ?? false,
+        isClosed: false,
+        closesAt,
+      })
+      .returning();
+    
+    return {
+      ...poll,
+      options: pollOptions,
+      results: pollOptions.map(opt => ({ optionId: opt.id, count: 0, voters: [] })),
+      userVotes: [],
+      totalVotes: 0,
+    };
+  }
+
+  async votePoll(pollId: number, userId: string, optionIds: number[]): Promise<PollWithResults> {
+    // Get the poll
+    const [poll] = await db
+      .select()
+      .from(polls)
+      .where(eq(polls.id, pollId))
+      .limit(1);
+    
+    if (!poll) throw new Error('Poll not found');
+    if (poll.isClosed) throw new Error('Poll is closed');
+    if (poll.closesAt && new Date(poll.closesAt) < new Date()) {
+      throw new Error('Poll is closed');
+    }
+    
+    // Verify user is a chat member
+    const chat = await this.getChat(poll.chatId);
+    if (!chat) throw new Error('Chat not found');
+    
+    const member = chat.members.find(m => m.userId === userId);
+    if (!member) throw new Error('Not a chat member');
+    
+    // Validate option IDs
+    const pollOptions = this.normalizePollOptions(poll.options);
+    const validOptionIds = pollOptions.map(o => o.id);
+    if (!optionIds.every(id => validOptionIds.includes(id))) {
+      throw new Error('Invalid option IDs');
+    }
+    
+    // If single answer, check that only one option is selected
+    if (!poll.allowMultipleAnswers && optionIds.length > 1) {
+      throw new Error('Poll does not allow multiple answers');
+    }
+    
+    // Remove existing votes
+    await db
+      .delete(pollVotes)
+      .where(
+        and(
+          eq(pollVotes.pollId, pollId),
+          eq(pollVotes.userId, userId)
+        )
+      );
+    
+    // Add new votes
+    for (const optionId of optionIds) {
+      await db.insert(pollVotes).values({
+        pollId,
+        userId,
+        optionId,
+      });
+    }
+    
+    return this.getPollResults(pollId, userId);
+  }
+
+  async closePoll(pollId: number, userId: string): Promise<PollWithResults> {
+    // Get the poll
+    const [poll] = await db
+      .select()
+      .from(polls)
+      .where(eq(polls.id, pollId))
+      .limit(1);
+    
+    if (!poll) throw new Error('Poll not found');
+    
+    // Verify user is creator or admin
+    const chat = await this.getChat(poll.chatId);
+    if (!chat) throw new Error('Chat not found');
+    
+    const member = chat.members.find(m => m.userId === userId);
+    if (!member) throw new Error('Not a chat member');
+    
+    if (poll.createdBy !== userId && member.role !== 'admin') {
+      throw new Error('Only poll creator or group admins can close the poll');
+    }
+    
+    // Close the poll
+    await db
+      .update(polls)
+      .set({ isClosed: true })
+      .where(eq(polls.id, pollId));
+    
+    return this.getPollResults(pollId, userId);
+  }
+
+  async getPollResults(pollId: number, userId: string): Promise<PollWithResults> {
+    // Get the poll
+    const [poll] = await db
+      .select()
+      .from(polls)
+      .where(eq(polls.id, pollId))
+      .limit(1);
+    
+    if (!poll) throw new Error('Poll not found');
+    
+    // Verify user is a chat member
+    const chat = await this.getChat(poll.chatId);
+    if (!chat) throw new Error('Chat not found');
+    
+    const member = chat.members.find(m => m.userId === userId);
+    if (!member) throw new Error('Not a chat member');
+    
+    // Get all votes
+    const votes = await db
+      .select()
+      .from(pollVotes)
+      .where(eq(pollVotes.pollId, pollId));
+    
+    // Get user votes
+    const userVotes = votes
+      .filter(v => v.userId === userId)
+      .map(v => v.optionId);
+    
+    // Calculate results
+    const pollOptions = this.normalizePollOptions(poll.options);
+    const results = await Promise.all(
+      pollOptions.map(async (opt) => {
+        const optionVotes = votes.filter(v => v.optionId === opt.id);
+        const count = optionVotes.length;
+        
+        let voters: User[] = [];
+        if (!poll.isAnonymous) {
+          const voterIds = optionVotes.map(v => v.userId);
+          if (voterIds.length > 0) {
+            const voterUsers = await db
+              .select()
+              .from(users)
+              .where(inArray(users.id, voterIds));
+            voters = voterUsers.map(sanitizeUser);
+          }
+        }
+        
+        return {
+          optionId: opt.id,
+          count,
+          voters: poll.isAnonymous ? undefined : voters,
+        };
+      })
+    );
+    
+    return {
+      ...poll,
+      options: pollOptions,
+      results,
+      userVotes,
+      totalVotes: votes.length,
+    };
   }
 }
 

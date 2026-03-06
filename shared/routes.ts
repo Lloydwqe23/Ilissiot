@@ -42,6 +42,34 @@ export const reactionResponseSchema = z.object({
   user: userSchema,
 });
 
+export const pollOptionResponseSchema = z.object({
+  id: z.number(),
+  text: z.string(),
+});
+
+export const pollResultResponseSchema = z.object({
+  optionId: z.number(),
+  count: z.number(),
+  voters: z.array(userSchema).optional(),
+});
+
+export const pollResponseSchema = z.object({
+  id: z.number(),
+  chatId: z.number(),
+  messageId: z.number(),
+  createdBy: z.string(),
+  question: z.string(),
+  options: z.array(pollOptionResponseSchema),
+  allowMultipleAnswers: z.boolean().nullable(),
+  isAnonymous: z.boolean().nullable(),
+  isClosed: z.boolean().nullable(),
+  closesAt: z.string().or(z.date()).nullable().optional(),
+  createdAt: z.string().or(z.date()).nullable(),
+  results: z.array(pollResultResponseSchema),
+  userVotes: z.array(z.number()).optional(),
+  totalVotes: z.number(),
+});
+
 export const messageResponseSchema = z.object({
   id: z.number(),
   chatId: z.number(),
@@ -57,6 +85,7 @@ export const messageResponseSchema = z.object({
   createdAt: z.string().or(z.date()).nullable(),
   updatedAt: z.string().or(z.date()).nullable(),
   sender: userSchema,
+  poll: pollResponseSchema.nullable().optional(),
   reactions: z.array(reactionResponseSchema).optional(),
 });
 

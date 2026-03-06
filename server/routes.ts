@@ -878,5 +878,340 @@ export async function registerRoutes(
     }
   });
 
+  // ═══════════════════════════════════════════════════════════════
+  // PINNED MESSAGES ROUTES
+  // ═══════════════════════════════════════════════════════════════
+
+  // Pin a message in a chat
+  app.post('/api/chats/:chatId/messages/:messageId/pin', isAuthenticated, async (req: any, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const messageId = Number(req.params.messageId);
+      const userId = req.user.claims.sub as string;
+
+      const pinnedMessage = await storage.pinMessage(chatId, messageId, userId);
+      
+      // Broadcast to chat members
+      const chat = await storage.getChat(chatId);
+      if (chat) {
+        chat.members.forEach(member => {
+          sendToUser(member.userId!, {
+            type: WS_EVENTS.MESSAGE_PIN,
+            payload: pinnedMessage,
+          });
+        });
+      }
+
+      res.status(201).json(pinnedMessage);
+    } catch (err: any) {
+      if (err.message === 'Not a chat member' || err.message === 'Only admins can pin messages in groups') {
+        return res.status(403).json({ message: err.message });
+      }
+      if (err.message === 'Message not found' || err.message === 'Chat not found') {
+        return res.status(404).json({ message: err.message });
+      }
+      console.error('Error pinning message:', err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Unpin a message
+  app.delete('/api/chats/:chatId/messages/:messageId/pin', isAuthenticated, async (req: any, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const messageId = Number(req.params.messageId);
+      const userId = req.user.claims.sub as string;
+
+      await storage.unpinMessage(chatId, messageId, userId);
+      
+      // Broadcast to chat members
+      const chat = await storage.getChat(chatId);
+      if (chat) {
+        chat.members.forEach(member => {
+          sendToUser(member.userId!, {
+            type: WS_EVENTS.MESSAGE_UNPIN,
+            payload: { chatId, messageId },
+          });
+        });
+      }
+
+      res.json({ success: true });
+    } catch (err: any) {
+      if (err.message === 'Not a chat member' || err.message === 'Only admins can unpin messages in groups') {
+        return res.status(403).json({ message: err.message });
+      }
+      if (err.message === 'Pinned message not found') {
+        return res.status(404).json({ message: err.message });
+      }
+      console.error('Error unpinning message:', err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Get pinned messages for a chat
+  app.get('/api/chats/:chatId/pinned-messages', isAuthenticated, async (req: any, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const userId = req.user.claims.sub as string;
+
+      const pinnedMessages = await storage.getPinnedMessages(chatId, userId);
+      res.json(pinnedMessages);
+    } catch (err: any) {
+      if (err.message === 'Not a chat member') {
+        return res.status(403).json({ message: err.message });
+      }
+      console.error('Error getting pinned messages:', err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // GROUP INVITE LINKS ROUTES
+  // ═══════════════════════════════════════════════════════════════
+
+  // Create invite link for a group
+  app.post('/api/chats/:chatId/invite-links', isAuthenticated, async (req: any, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const userId = req.user.claims.sub as string;
+      const { expiresAt, maxUses } = req.body as { expiresAt?: string; maxUses?: number };
+
+      const inviteLink = await storage.createInviteLink(
+        chatId, 
+        userId, 
+        expiresAt ? new Date(expiresAt) : undefined,
+        maxUses
+      );
+      
+      res.status(201).json(inviteLink);
+    } catch (err: any) {
+      if (err.message === 'Not a group chat' || err.message === 'Only admins can create invite links') {
+        return res.status(403).json({ message: err.message });
+      }
+      if (err.message === 'Chat not found') {
+        return res.status(404).json({ message: err.message });
+      }
+      console.error('Error creating invite link:', err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Get invite links for a group
+  app.get('/api/chats/:chatId/invite-links', isAuthenticated, async (req: any, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const userId = req.user.claims.sub as string;
+
+      const inviteLinks = await storage.getInviteLinks(chatId, userId);
+      res.json(inviteLinks);
+    } catch (err: any) {
+      if (err.message === 'Not a chat member') {
+        return res.status(403).json({ message: err.message });
+      }
+      console.error('Error getting invite links:', err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Revoke/deactivate an invite link
+  app.delete('/api/invite-links/:token', isAuthenticated, async (req: any, res) => {
+    try {
+      const { token } = req.params;
+      const userId = req.user.claims.sub as string;
+
+      await storage.revokeInviteLink(token, userId);
+      res.json({ success: true });
+    } catch (err: any) {
+      if (err.message === 'Only admins can revoke invite links') {
+        return res.status(403).json({ message: err.message });
+      }
+      if (err.message === 'Invite link not found') {
+        return res.status(404).json({ message: err.message });
+      }
+      console.error('Error revoking invite link:', err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Join group via invite link
+  app.post('/api/invite-links/:token/join', isAuthenticated, async (req: any, res) => {
+    try {
+      const { token } = req.params;
+      const userId = req.user.claims.sub as string;
+
+      const chat = await storage.joinViaInviteLink(token, userId);
+      res.json(chat);
+    } catch (err: any) {
+      if (err.message === 'Invite link expired' || err.message === 'Invite link has reached maximum uses' || err.message === 'Invite link is not active' || err.message === 'Already a member of this group') {
+        return res.status(400).json({ message: err.message });
+      }
+      if (err.message === 'Invite link not found') {
+        return res.status(404).json({ message: err.message });
+      }
+      console.error('Error joining via invite link:', err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Get invite link info (public - doesn't require authentication)
+  app.get('/api/invite-links/:token/info', async (req: any, res) => {
+    try {
+      const { token } = req.params;
+
+      const inviteLinkInfo = await storage.getInviteLinkInfo(token);
+      res.json(inviteLinkInfo);
+    } catch (err: any) {
+      if (err.message === 'Invite link not found' || err.message === 'Invite link expired' || err.message === 'Invite link is not active') {
+        return res.status(404).json({ message: err.message });
+      }
+      console.error('Error getting invite link info:', err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // POLLS ROUTES
+  // ═══════════════════════════════════════════════════════════════
+
+  // Create a poll (only in group chats)
+  app.post('/api/chats/:chatId/polls', isAuthenticated, async (req: any, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const userId = req.user.claims.sub as string;
+      const { question, options, allowMultipleAnswers, isAnonymous, closesAt } = req.body as {
+        question: string;
+        options: string[];
+        allowMultipleAnswers?: boolean;
+        isAnonymous?: boolean;
+        closesAt?: string;
+      };
+
+      if (!question || !options || options.length < 2) {
+        return res.status(400).json({ message: "Poll must have a question and at least 2 options" });
+      }
+
+      const poll = await storage.createPoll(
+        chatId,
+        userId,
+        question,
+        options,
+        allowMultipleAnswers,
+        isAnonymous,
+        closesAt ? new Date(closesAt) : undefined
+      );
+
+      // Broadcast to chat members
+      const chat = await storage.getChat(chatId);
+      if (chat) {
+        chat.members.forEach(member => {
+          sendToUser(member.userId!, {
+            type: WS_EVENTS.POLL_NEW,
+            payload: poll,
+          });
+        });
+      }
+
+      res.status(201).json(poll);
+    } catch (err: any) {
+      if (err.message === 'Not a group chat' || err.message === 'Not a chat member') {
+        return res.status(403).json({ message: err.message });
+      }
+      if (err.message === 'Chat not found') {
+        return res.status(404).json({ message: err.message });
+      }
+      console.error('Error creating poll:', err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Vote on a poll
+  app.post('/api/polls/:pollId/vote', isAuthenticated, async (req: any, res) => {
+    try {
+      const pollId = Number(req.params.pollId);
+      const userId = req.user.claims.sub as string;
+      const { optionIds } = req.body as { optionIds: number[] };
+
+      if (!optionIds || optionIds.length === 0) {
+        return res.status(400).json({ message: "Must select at least one option" });
+      }
+
+      const poll = await storage.votePoll(pollId, userId, optionIds);
+
+      // Broadcast to chat members
+      const chat = await storage.getChat(poll.chatId);
+      if (chat) {
+        chat.members.forEach(member => {
+          sendToUser(member.userId!, {
+            type: WS_EVENTS.POLL_VOTE,
+            payload: { pollId, userId: poll.isAnonymous ? undefined : userId, optionIds },
+          });
+        });
+      }
+
+      res.json(poll);
+    } catch (err: any) {
+      if (err.message === 'Poll is closed' || err.message === 'Not a chat member' || err.message === 'Poll does not allow multiple answers' || err.message === 'Invalid option IDs') {
+        return res.status(400).json({ message: err.message });
+      }
+      if (err.message === 'Poll not found') {
+        return res.status(404).json({ message: err.message });
+      }
+      console.error('Error voting on poll:', err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Close a poll
+  app.post('/api/polls/:pollId/close', isAuthenticated, async (req: any, res) => {
+    try {
+      const pollId = Number(req.params.pollId);
+      const userId = req.user.claims.sub as string;
+
+      const poll = await storage.closePoll(pollId, userId);
+
+      // Broadcast to chat members
+      const chat = await storage.getChat(poll.chatId);
+      if (chat) {
+        chat.members.forEach(member => {
+          sendToUser(member.userId!, {
+            type: WS_EVENTS.POLL_CLOSE,
+            payload: { pollId },
+          });
+        });
+      }
+
+      res.json(poll);
+    } catch (err: any) {
+      if (err.message === 'Only poll creator or group admins can close the poll') {
+        return res.status(403).json({ message: err.message });
+      }
+      if (err.message === 'Poll not found') {
+        return res.status(404).json({ message: err.message });
+      }
+      console.error('Error closing poll:', err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Get poll results
+  app.get('/api/polls/:pollId', isAuthenticated, async (req: any, res) => {
+    try {
+      const pollId = Number(req.params.pollId);
+      const userId = req.user.claims.sub as string;
+
+      const poll = await storage.getPollResults(pollId, userId);
+      res.json(poll);
+    } catch (err: any) {
+      if (err.message === 'Not a chat member') {
+        return res.status(403).json({ message: err.message });
+      }
+      if (err.message === 'Poll not found') {
+        return res.status(404).json({ message: err.message });
+      }
+      console.error('Error getting poll results:', err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   return httpServer;
 }
