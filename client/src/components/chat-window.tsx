@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, ReactNode } from "react";
 import { format, isToday, isYesterday } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, CheckCircle2, Smile, Phone, Video, Mic, StopCircle, Ban, Search, Pencil, Check, Play, Pause, Download, Reply, Share2, FileText, FileSpreadsheet, FileType, File as FileIcon, Presentation, FileArchive, FileCode, Users, UserPlus, UserMinus, Crown, Maximize, ScreenShare, Pin, BarChart3, Link2 } from "lucide-react";
+import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, CheckCircle2, Smile, Phone, Video, Mic, StopCircle, Ban, Search, Pencil, Check, Play, Pause, Download, Reply, Share2, FileText, FileSpreadsheet, FileType, File as FileIcon, Presentation, FileArchive, FileCode, Users, UserPlus, UserMinus, Crown, Maximize, ScreenShare, Pin, BarChart3, Link2, Paintbrush, Shield, CalendarDays } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useChat, useChats, useBlockStatus, useBlockUser, useUnblockUser, useLeaveGroup, useAddGroupMembers, useRemoveGroupMember, useUpdateGroupChat, usePinMessage, useUnpinMessage } from "@/hooks/use-chats";
 import { useMessages, useSendMessage, useMarkMessagesRead, useDeleteMessages, useEditMessage, useAddReaction, useRemoveReaction } from "@/hooks/use-messages";
 import { useUserStatus, formatLastSeen } from "@/hooks/use-user-status";
+import { useTypingUsers, useSendTyping } from "@/hooks/use-typing";
 import { useCall } from "@/hooks/use-call";
 import { useSearchUsers } from "@/hooks/use-users";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -16,10 +17,16 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger, ContextMenuSeparator } from "@/components/ui/context-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { UserProfileModal } from "@/components/user-profile-modal";
-import { PinnedMessagesBar } from "@/components/pinned-messages-bar";
+import { PinnedMessagesButton } from "@/components/pinned-messages-button";
 import { CreatePollDialog } from "@/components/create-poll-dialog";
 import { GroupInviteLinksDialog } from "@/components/group-invite-links-dialog";
 import { PollMessage } from "@/components/poll-message";
+import { BackgroundPicker } from "@/components/background-picker";
+import { MemberSettingsDialog } from "@/components/member-settings-dialog";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { getChatBackground, setChatBackground, findBackground, getCustomBackgroundUrl, setCustomBackgroundUrl, removeCustomBackground, buildCustomBackgroundStyle } from "@/lib/chat-backgrounds";
+import { formatMessageContent } from "@/lib/format-message";
 import { useLocation } from "wouter";
 
 /** Audio message component with custom waveform player */
@@ -482,12 +489,15 @@ function GroupInfoDialog({
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState(chat.name || '');
+  const [settingsMember, setSettingsMember] = useState<any>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const { data: searchResults } = useSearchUsers(searchQuery);
 
   const myMembership = chat.members?.find((m: any) => m.userId === currentUserId);
   const isAdmin = myMembership?.role === 'admin';
+  const myPerms = (myMembership?.permissions || {}) as Record<string, boolean>;
+  const canEditInfo = isAdmin || myPerms.canEditInfo === true;
   const existingIds = new Set(chat.members?.map((m: any) => m.userId) || []);
 
   const filteredResults = searchResults?.filter(
@@ -528,20 +538,22 @@ function GroupInfoDialog({
             />
             <button
               type="button"
-              className="relative group/avatar shrink-0"
-              onClick={() => avatarInputRef.current?.click()}
-              disabled={uploadingAvatar}
+              className={`relative group/avatar shrink-0 ${!canEditInfo ? 'cursor-default' : ''}`}
+              onClick={() => canEditInfo && avatarInputRef.current?.click()}
+              disabled={uploadingAvatar || !canEditInfo}
             >
               <Avatar className="w-12 h-12 border border-border/50">
                 <AvatarImage src={chat.avatarUrl || ''} />
                 <AvatarFallback className="bg-primary/10 text-primary font-medium"><Users className="w-5 h-5" /></AvatarFallback>
               </Avatar>
-              <div className="absolute inset-0 rounded-full bg-black/40 flex items-center justify-center opacity-0 group-hover/avatar:opacity-100 transition-opacity">
-                {uploadingAvatar ? <Loader2 className="w-4 h-4 text-white animate-spin" /> : <Pencil className="w-4 h-4 text-white" />}
-              </div>
+              {canEditInfo && (
+                <div className="absolute inset-0 rounded-full bg-black/40 flex items-center justify-center opacity-0 group-hover/avatar:opacity-100 transition-opacity">
+                  {uploadingAvatar ? <Loader2 className="w-4 h-4 text-white animate-spin" /> : <Pencil className="w-4 h-4 text-white" />}
+                </div>
+              )}
             </button>
             <div className="flex-1 min-w-0">
-              {editingName ? (
+              {editingName && canEditInfo ? (
                 <form
                   className="flex items-center gap-1"
                   onSubmit={(e) => {
@@ -570,15 +582,14 @@ function GroupInfoDialog({
                   />
                 </form>
               ) : (
-                <button
-                  type="button"
-                  className="flex items-center gap-1.5 group/name hover:opacity-80 transition-opacity text-left"
-                  onClick={() => { setNameValue(chat.name || ''); setEditingName(true); }}
-                  title="Click to rename"
+                <div
+                  className={`flex items-center gap-1.5 text-left ${canEditInfo ? 'group/name hover:opacity-80 transition-opacity cursor-pointer' : ''}`}
+                  onClick={() => { if (canEditInfo) { setNameValue(chat.name || ''); setEditingName(true); } }}
+                  title={canEditInfo ? 'Click to rename' : undefined}
                 >
                   <span className="text-lg font-semibold truncate">{chat.name || 'Group'}</span>
-                  <Pencil className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover/name:opacity-100 transition-opacity shrink-0" />
-                </button>
+                  {canEditInfo && <Pencil className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover/name:opacity-100 transition-opacity shrink-0" />}
+                </div>
               )}
               <p className="text-sm text-muted-foreground font-normal">{chat.members?.length || 0} members</p>
             </div>
@@ -637,11 +648,20 @@ function GroupInfoDialog({
               </Button>
             </div>
             <div className="overflow-y-auto flex-1 space-y-1">
-              {chat.members?.map((m: any) => {
+              {/* Resolve effective creator: explicit creatorId or earliest-joined admin */}
+              {(() => {
+                const effectiveCreatorId = chat.creatorId || (() => {
+                  const admins = (chat.members || [])
+                    .filter((m: any) => m.role === 'admin')
+                    .sort((a: any, b: any) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime());
+                  return admins.length > 0 ? admins[0].userId : null;
+                })();
+                return chat.members?.map((m: any) => {
                 const memberUser = m.user;
                 const memberName = [memberUser?.firstName, memberUser?.lastName].filter(Boolean).join(' ') || memberUser?.email || 'Unknown';
                 const isSelf = m.userId === currentUserId;
                 const memberIsAdmin = m.role === 'admin';
+                const isCreator = effectiveCreatorId && m.userId === effectiveCreatorId;
 
                 return (
                   <div key={m.userId} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/50 transition-colors">
@@ -654,29 +674,64 @@ function GroupInfoDialog({
                     </Avatar>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{memberName}{isSelf ? ' (You)' : ''}</p>
-                      {memberIsAdmin && (
-                        <span className="text-[11px] text-primary flex items-center gap-1">
-                          <Crown className="w-3 h-3" /> Admin
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {isCreator && (
+                          <span className="text-[11px] text-amber-500 flex items-center gap-0.5 font-semibold">
+                            <Crown className="w-3 h-3" /> Creator
+                          </span>
+                        )}
+                        {memberIsAdmin && !isCreator && (
+                          <span className="text-[11px] text-primary flex items-center gap-0.5">
+                            <Crown className="w-3 h-3" /> Admin
+                          </span>
+                        )}
+                        {m.title && (
+                          <span className="text-[11px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full font-medium">
+                            {m.title}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    {isAdmin && !isSelf && (
+                    {isAdmin && !isSelf && !isCreator && (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="w-7 h-7 text-muted-foreground hover:text-primary"
+                          onClick={() => setSettingsMember(m)}
+                          title="Member settings"
+                        >
+                          <Shield className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="w-7 h-7 text-muted-foreground hover:text-destructive"
+                          onClick={() => {
+                            if (confirm(`Remove ${memberName} from the group?`)) {
+                              removeGroupMember.mutate({ chatId: chat.id, userId: m.userId });
+                            }
+                          }}
+                        >
+                          <UserMinus className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    )}
+                    {!isAdmin && isSelf && (
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="w-7 h-7 text-muted-foreground hover:text-destructive shrink-0"
-                        onClick={() => {
-                          if (confirm(`Remove ${memberName} from the group?`)) {
-                            removeGroupMember.mutate({ chatId: chat.id, userId: m.userId });
-                          }
-                        }}
+                        className="w-7 h-7 text-muted-foreground hover:text-primary shrink-0"
+                        onClick={() => setSettingsMember(m)}
+                        title="View your permissions"
                       >
-                        <UserMinus className="w-4 h-4" />
+                        <Shield className="w-4 h-4" />
                       </Button>
                     )}
                   </div>
                 );
-              })}
+              });
+              })()}
             </div>
 
             {/* Leave group button */}
@@ -696,6 +751,17 @@ function GroupInfoDialog({
           </div>
         )}
       </DialogContent>
+
+      {/* Member Settings Dialog */}
+      {settingsMember && (
+        <MemberSettingsDialog
+          open={!!settingsMember}
+          onOpenChange={(v) => { if (!v) setSettingsMember(null); }}
+          chatId={chat.id}
+          member={settingsMember}
+          isCurrentUserAdmin={isAdmin}
+        />
+      )}
     </Dialog>
   );
 }
@@ -775,6 +841,59 @@ export function ChatWindow({ chatId }: { chatId: number }) {
 
   // invite links dialog state
   const [inviteLinksOpen, setInviteLinksOpen] = useState(false);
+
+  // background picker state
+  const [bgPickerOpen, setBgPickerOpen] = useState(false);
+  const [chatBgId, setChatBgId] = useState(() => getChatBackground(chatId));
+  const [customBgUrl, setCustomBgUrl] = useState<string | null>(() => getCustomBackgroundUrl(chatId));
+  const chatBg = findBackground(chatBgId);
+  const isCustomBg = chatBgId !== 'default';
+  const effectiveBgStyle = chatBgId === 'custom-image' && customBgUrl
+    ? buildCustomBackgroundStyle(customBgUrl)
+    : isCustomBg ? chatBg.style : undefined;
+
+  // delete group confirmation dialog state
+  const [deleteGroupConfirmOpen, setDeleteGroupConfirmOpen] = useState(false);
+
+  // jump-to-date calendar popover state — stores the date-key of the open divider (or null)
+  const [datePickerOpenKey, setDatePickerOpenKey] = useState<string | null>(null);
+
+  // Sync background when switching chats
+  useEffect(() => {
+    setChatBgId(getChatBackground(chatId));
+    setCustomBgUrl(getCustomBackgroundUrl(chatId));
+  }, [chatId]);
+
+  // Jump to date handler — finds the first message on or after the selected date and scrolls to it
+  const handleJumpToDate = (date: Date | undefined) => {
+    if (!date || !messages) return;
+    setDatePickerOpenKey(null);
+    // Set target to start of selected day
+    const targetStart = new Date(date);
+    targetStart.setHours(0, 0, 0, 0);
+    // Find the first message on or after the selected date
+    let targetMsg = messages.find(msg => {
+      const msgDate = new Date(msg.createdAt!);
+      return msgDate >= targetStart;
+    });
+    // If no message found on/after that date, jump to the last message
+    if (!targetMsg && messages.length > 0) {
+      targetMsg = messages[messages.length - 1];
+    }
+    if (targetMsg) {
+      // Wait for popover close animation to finish before scrolling
+      const msgId = targetMsg.id;
+      setTimeout(() => {
+        const element = document.querySelector(`[data-message-id="${msgId}"]`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          // Brief highlight
+          element.classList.add('ring-2', 'ring-primary/50', 'rounded-lg');
+          setTimeout(() => element.classList.remove('ring-2', 'ring-primary/50', 'rounded-lg'), 2000);
+        }
+      }, 300);
+    }
+  };
 
   // pin message mutation
   const pinMessage = usePinMessage();
@@ -1666,6 +1785,20 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const statusInfo = useUserStatus(otherMember?.userId);
   const statusText = formatLastSeen(statusInfo, otherMember?.user?.status, otherMember?.user?.lastSeen);
 
+  // Typing indicator
+  const typingUsers = useTypingUsers(chatId);
+  const sendTyping = useSendTyping(chatId);
+
+  const typingLabel = (() => {
+    if (typingUsers.length === 0) return null;
+    if (chat?.isGroup) {
+      if (typingUsers.length === 1) return `${typingUsers[0].userName} is typing`;
+      if (typingUsers.length === 2) return `${typingUsers[0].userName} and ${typingUsers[1].userName} are typing`;
+      return `${typingUsers[0].userName} and ${typingUsers.length - 1} others are typing`;
+    }
+    return 'typing';
+  })();
+
   const handleClearHistoryForMe = async () => {
     if (!confirm("Clear all chat history from your view only?")) return;
     try {
@@ -1708,6 +1841,22 @@ export function ChatWindow({ chatId }: { chatId: number }) {
     } catch (err) {
       console.error("Error deleting chat:", err);
       alert("Failed to delete chat");
+    }
+  };
+
+  const handleDeleteGroup = async () => {
+    try {
+      const response = await fetch(`/api/chats/${chatId}`, { method: 'DELETE', credentials: 'include' });
+      if (response.ok) {
+        setDeleteGroupConfirmOpen(false);
+        navigate('/');
+      } else {
+        const err = await response.json().catch(() => ({}));
+        alert(err.message || "Failed to delete group");
+      }
+    } catch (err) {
+      console.error("Error deleting group:", err);
+      alert("Failed to delete group");
     }
   };
 
@@ -1859,7 +2008,10 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const avatarUrl = getChatAvatar();
 
   return (
-    <div className="flex-1 flex flex-col h-screen relative bg-[#f8f9fa] dark:bg-[#0e1621] overflow-hidden">
+    <div
+      className={`flex-1 flex flex-col h-screen relative overflow-hidden ${isCustomBg ? '' : 'bg-[#f8f9fa] dark:bg-[#0e1621]'}`}
+      style={effectiveBgStyle}
+    >
 
       {/* Header */}
       <header className="h-16 glass-panel flex items-center justify-between px-4 z-10 shrink-0 shadow-sm">
@@ -1931,8 +2083,17 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                 }}
               >
                 <h2 className="font-semibold text-[15px] leading-tight text-foreground">{displayName}</h2>
-                <span className={`text-[12px] ${!chat.isGroup && statusText === 'online' ? 'text-green-500 font-medium' : 'text-muted-foreground'}`}>
-                  {chat.isGroup ? `${chat.members.length} members` : statusText}
+                <span className={`text-[12px] ${typingLabel ? 'text-primary font-medium' : !chat.isGroup && statusText === 'online' ? 'text-green-500 font-medium' : 'text-muted-foreground'}`}>
+                  {typingLabel ? (
+                    <span className="inline-flex items-baseline">
+                      {typingLabel}
+                      <span className="inline-flex ml-[1px] gap-[1.5px]">
+                        <span className="w-[3px] h-[3px] rounded-full bg-primary animate-typing-dot-1" />
+                        <span className="w-[3px] h-[3px] rounded-full bg-primary animate-typing-dot-2" />
+                        <span className="w-[3px] h-[3px] rounded-full bg-primary animate-typing-dot-3" />
+                      </span>
+                    </span>
+                  ) : (chat.isGroup ? `${chat.members.length} members` : statusText)}
                 </span>
               </div>
             </div>
@@ -1982,6 +2143,17 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                 </>
               )}
 
+              <PinnedMessagesButton
+                chatId={chatId}
+                currentUserId={user?.id}
+                onNavigateToMessage={(messageId) => {
+                  const element = document.querySelector(`[data-message-id="${messageId}"]`);
+                  if (element) {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  }
+                }}
+              />
+
               <Button
                 variant="ghost"
                 size="icon"
@@ -2016,6 +2188,11 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                       <DropdownMenuSeparator />
                     </>
                   )}
+                  <DropdownMenuItem onClick={() => setBgPickerOpen(true)}>
+                    <Paintbrush className="w-4 h-4 mr-2" />
+                    Change Background
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => handleClearHistoryForMe()}>Clear history for me</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => handleClearHistoryForAll()}>Clear history for everyone</DropdownMenuItem>
                   <DropdownMenuSeparator />
@@ -2033,10 +2210,25 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => handleDeleteChat()} className="text-destructive">
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    Delete chat
-                  </DropdownMenuItem>
+                  {chat?.isGroup ? (() => {
+                    const effectiveCreator = chat.creatorId || (() => {
+                      const admins = (chat.members || [])
+                        .filter((m: any) => m.role === 'admin')
+                        .sort((a: any, b: any) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime());
+                      return admins.length > 0 ? admins[0].userId : null;
+                    })();
+                    return effectiveCreator === user?.id ? (
+                      <DropdownMenuItem onClick={() => setDeleteGroupConfirmOpen(true)} className="text-destructive">
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        Delete group
+                      </DropdownMenuItem>
+                    ) : null;
+                  })() : (
+                    <DropdownMenuItem onClick={() => handleDeleteChat()} className="text-destructive">
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Delete chat
+                    </DropdownMenuItem>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -2112,19 +2304,6 @@ export function ChatWindow({ chatId }: { chatId: number }) {
         </div>
       )}
 
-      {/* Pinned Messages Bar */}
-      <PinnedMessagesBar
-        chatId={chatId}
-        currentUserId={user?.id}
-        isAdmin={chat?.members.find(m => m.userId === user?.id)?.role === 'admin'}
-        onNavigateToMessage={(messageId) => {
-          const element = document.querySelector(`[data-message-id="${messageId}"]`);
-          if (element) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
-        }}
-      />
-
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 scrollbar-hide flex flex-col">
         {messages?.length === 0 ? (
@@ -2153,13 +2332,35 @@ export function ChatWindow({ chatId }: { chatId: number }) {
 
                 return (
                   <div key={msg.id}>
-                    {showDateDivider && (
-                      <div className="flex justify-center my-2">
-                        <span className="px-3 py-1 rounded-full text-[11px] font-medium bg-muted/80 text-muted-foreground border border-border/50">
-                          {dateDividerLabel}
-                        </span>
-                      </div>
-                    )}
+                    {showDateDivider && (() => {
+                      const dividerKey = currentMsgDate.toDateString();
+                      return (
+                        <div className="flex justify-center my-2">
+                          <Popover
+                            open={datePickerOpenKey === dividerKey}
+                            onOpenChange={(open) => setDatePickerOpenKey(open ? dividerKey : null)}
+                          >
+                            <PopoverTrigger asChild>
+                              <button
+                                className="px-3 py-1 rounded-full text-[11px] font-medium bg-muted/80 text-muted-foreground border border-border/50 hover:bg-muted hover:text-foreground hover:border-border transition-colors cursor-pointer flex items-center gap-1.5"
+                                title="Jump to date"
+                              >
+                                <CalendarDays className="w-3 h-3" />
+                                {dateDividerLabel}
+                              </button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0" align="center" sideOffset={8}>
+                              <Calendar
+                                mode="single"
+                                onSelect={handleJumpToDate}
+                                disabled={(date) => date > new Date()}
+                                defaultMonth={currentMsgDate}
+                              />
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+                      );
+                    })()}
                     <ContextMenu>
                       <ContextMenuTrigger asChild>
                       <motion.div
@@ -2211,11 +2412,19 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                       ${isCurrentMatch ? 'ring-2 ring-amber-500 scale-[1.02] shadow-lg shadow-amber-500/30' : hasMatch && isSearching ? 'ring-1 ring-amber-400/50' : ''}
                     `}>
                       {/* Sender name in group chats */}
-                      {chat?.isGroup && !isMine && showAvatar && (
-                        <p className="text-[12px] font-semibold text-primary mb-1">
-                          {msg.sender?.firstName || 'Unknown'}
-                        </p>
-                      )}
+                      {chat?.isGroup && !isMine && showAvatar && (() => {
+                        const senderMember = chat.members?.find((m: any) => m.userId === msg.senderId);
+                        return (
+                          <p className="text-[12px] font-semibold text-primary mb-1">
+                            {msg.sender?.firstName || 'Unknown'}
+                            {senderMember?.title && (
+                              <span className="ml-1.5 text-[10px] font-medium bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">
+                                {senderMember.title}
+                              </span>
+                            )}
+                          </p>
+                        );
+                      })()}
 
                       {/* Reply preview */}
                       {msg.attachments && msg.attachments.some((a: any) => a.type === 'reply') && (() => {
@@ -2286,8 +2495,8 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                           );
                         }
                         // Apply highlighting only to text content when searching
-                        const displayContent = isSearching && allMatches.length > 0 ? highlightText(msg.content) : linkifyText(msg.content);
-                        return <p className="text-[15px] leading-relaxed break-words">{displayContent}</p>;
+                        const displayContent = isSearching && allMatches.length > 0 ? highlightText(msg.content) : formatMessageContent(msg.content);
+                        return <div className="text-[15px] leading-relaxed break-words">{displayContent}</div>;
                       })()}
 
                       {/* Attachments */}
@@ -2409,15 +2618,12 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                         <Share2 className="w-4 h-4 mr-2" />
                         Forward
                       </ContextMenuItem>
-                      {/* Only show Pin for admins in group chats or all users in direct chats */}
-                      {(!chat?.isGroup || chat?.members.find(m => m.userId === user?.id)?.role === 'admin') && (
-                        <ContextMenuItem onClick={() => {
-                          pinMessage.mutate({ chatId, messageId: msg.id });
-                        }}>
-                          <Pin className="w-4 h-4 mr-2" />
-                          Pin Message
-                        </ContextMenuItem>
-                      )}
+                      <ContextMenuItem onClick={() => {
+                        pinMessage.mutate({ chatId, messageId: msg.id });
+                      }}>
+                        <Pin className="w-4 h-4 mr-2" />
+                        Pin Message
+                      </ContextMenuItem>
                       <ContextMenuItem onClick={() => {
                         if (!selectionMode) setSelectionMode(true);
                         toggleMessageSelection(msg.id);
@@ -2559,13 +2765,13 @@ export function ChatWindow({ chatId }: { chatId: number }) {
               <textarea
                 ref={textareaRef}
                 value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
+                onChange={(e) => { setInputValue(e.target.value); sendTyping(); }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
                   if (e.key === 'Escape' && editingMessageId) { e.preventDefault(); cancelEditingMessage(); }
                 }}
                 placeholder="Write a message..."
-                className="w-full max-h-32 min-h-[44px] bg-transparent resize-none border-0 focus:ring-0 text-[15px] py-2.5 px-3 scrollbar-hide"
+                className="w-full max-h-32 min-h-[44px] bg-transparent resize-none border-0 outline-none focus:ring-0 focus:outline-none text-[15px] py-2.5 px-3 scrollbar-hide"
                 rows={1}
               />
             </div>
@@ -3039,6 +3245,50 @@ export function ChatWindow({ chatId }: { chatId: number }) {
           chatId={chatId}
         />
       )}
+
+      {/* Background Picker Dialog */}
+      <BackgroundPicker
+        open={bgPickerOpen}
+        onOpenChange={setBgPickerOpen}
+        currentBgId={chatBgId}
+        onSelect={(bgId) => {
+          setChatBgId(bgId);
+          setChatBackground(chatId, bgId);
+        }}
+        customImageUrl={customBgUrl}
+        onCustomImage={(url) => {
+          setCustomBackgroundUrl(chatId, url);
+          setCustomBgUrl(url);
+          setChatBgId("custom-image");
+          setChatBackground(chatId, "custom-image");
+        }}
+        onRemoveCustomImage={() => {
+          removeCustomBackground(chatId);
+          setCustomBgUrl(null);
+          setChatBgId("default");
+        }}
+      />
+
+      {/* Delete Group Confirmation Dialog */}
+      <Dialog open={deleteGroupConfirmOpen} onOpenChange={setDeleteGroupConfirmOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Group</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this group? All messages, members, and group data will be permanently removed. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 pt-4">
+            <Button variant="outline" onClick={() => setDeleteGroupConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteGroup}>
+              <Trash2 className="w-4 h-4 mr-2" />
+              Delete Group
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

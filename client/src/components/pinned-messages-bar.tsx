@@ -59,7 +59,7 @@ export function PinnedMessagesBar({ chatId, currentUserId, isAdmin, onNavigateTo
       initial={{ height: 0, opacity: 0 }}
       animate={{ height: "auto", opacity: 1 }}
       exit={{ height: 0, opacity: 0 }}
-      className="border-b border-border bg-muted/30 overflow-hidden"
+      className="border-b border-border bg-background/95 backdrop-blur-sm overflow-hidden"
     >
       <div className="flex items-center gap-3 px-4 py-3">
         <Pin className="w-4 h-4 text-primary shrink-0" />
@@ -72,11 +72,11 @@ export function PinnedMessagesBar({ chatId, currentUserId, isAdmin, onNavigateTo
                 {currentPinned.message.sender?.firstName?.[0] || 'U'}
               </AvatarFallback>
             </Avatar>
-            <span className="text-xs font-medium text-muted-foreground">
+            <span className="text-xs font-semibold text-foreground">
               {currentPinned.message.sender?.firstName || 'Unknown'}
             </span>
           </div>
-          <p className="text-sm truncate">
+          <p className="text-sm truncate text-foreground/80">
             {currentPinned.message.content || '📎 Attachment'}
           </p>
         </div>
@@ -111,16 +111,14 @@ export function PinnedMessagesBar({ chatId, currentUserId, isAdmin, onNavigateTo
           </div>
         )}
 
-        {isAdmin && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 hover:bg-destructive/10 hover:text-destructive shrink-0"
-            onClick={handleUnpin}
-          >
-            <X className="w-4 h-4" />
-          </Button>
-        )}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6 hover:bg-destructive/10 hover:text-destructive shrink-0"
+          onClick={handleUnpin}
+        >
+          <X className="w-4 h-4" />
+        </Button>
       </div>
     </motion.div>
   );

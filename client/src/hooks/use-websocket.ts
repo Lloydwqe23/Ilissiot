@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, WS_EVENTS, type MessageResponse, type ChatResponse } from '@shared/routes';
 import { setUserStatus, setOnlineUsers } from './use-user-status';
+import { setTypingStart, setTypingStop, setWsSendForTyping } from './use-typing';
 import { useCall } from './use-call';
 
 export function useChatWebSocket(userId: string | undefined) {
@@ -42,6 +43,13 @@ export function useChatWebSocket(userId: string | undefined) {
 
         // Register WS sender for call signaling
         callRef.current.setWsSend((msg: any) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(msg));
+          }
+        });
+
+        // Register WS sender for typing events
+        setWsSendForTyping((msg: any) => {
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify(msg));
           }
@@ -252,6 +260,42 @@ export function useChatWebSocket(userId: string | undefined) {
             });
           }
 
+          // ── Pin / Unpin Events ─────────────────────────────────
+          if (data.type === WS_EVENTS.MESSAGE_PIN || data.type === WS_EVENTS.MESSAGE_UNPIN) {
+            const { chatId } = data.payload;
+            queryClient.invalidateQueries({
+              queryKey: ['pinned-messages', chatId],
+            });
+          }
+
+          // ── Chat Deleted (group was deleted by creator) ────────
+          if (data.type === WS_EVENTS.CHAT_DELETED) {
+            const { chatId: deletedChatId } = data.payload;
+            // Remove chat from the list cache
+            queryClient.setQueryData<ChatResponse[]>([api.chats.list.path], (old) => {
+              if (!old) return old;
+              return old.filter(c => c.id !== deletedChatId);
+            });
+            // Also invalidate the specific chat query
+            queryClient.removeQueries({
+              queryKey: [api.chats.get.path, String(deletedChatId)],
+            });
+            // If user is currently viewing the deleted chat, navigate away
+            if (window.location.pathname === `/chat/${deletedChatId}`) {
+              window.location.href = '/';
+            }
+          }
+
+          // ── Typing Events ──────────────────────────────────────
+          if (data.type === WS_EVENTS.TYPING_START) {
+            const { chatId, userId: typingUserId, userName } = data.payload;
+            setTypingStart(chatId, typingUserId, userName || 'Someone');
+          }
+          if (data.type === WS_EVENTS.TYPING_STOP) {
+            const { chatId, userId: typingUserId } = data.payload;
+            setTypingStop(chatId, typingUserId);
+          }
+
         } catch (err) {
           console.error('[WS] Parse error:', err);
         }
@@ -301,6 +345,7 @@ export function useChatWebSocket(userId: string | undefined) {
       document.removeEventListener('visibilitychange', onVisibilityChange);
       intentionalRef.current = true;
       if (reconnectRef.current) clearTimeout(reconnectRef.current);
+      setWsSendForTyping(null);
       wsRef.current?.close();
     };
   }, [userId, queryClient]);

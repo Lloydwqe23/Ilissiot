@@ -14,15 +14,18 @@ interface PollMessageProps {
 
 export function PollMessage({ poll, currentUserId, isCreator, isAdmin }: PollMessageProps) {
   const [selectedOptions, setSelectedOptions] = useState<number[]>(poll.userVotes || []);
+  const [isChangingVote, setIsChangingVote] = useState(false);
   const votePoll = useVotePoll();
   const closePoll = useClosePoll();
 
   const hasVoted = poll.userVotes && poll.userVotes.length > 0;
   const isClosed = poll.isClosed || (poll.closesAt && new Date(poll.closesAt) < new Date());
   const canVote = !isClosed;
+  const showSelectors = canVote && (!hasVoted || isChangingVote);
 
   const handleOptionToggle = (optionId: number) => {
     if (!canVote) return;
+    if (!showSelectors) return;
     if (poll.allowMultipleAnswers) {
       setSelectedOptions((prev) =>
         prev.includes(optionId)
@@ -36,7 +39,9 @@ export function PollMessage({ poll, currentUserId, isCreator, isAdmin }: PollMes
 
   const handleVote = () => {
     if (selectedOptions.length === 0 || !canVote) return;
-    votePoll.mutate({ pollId: poll.id, optionIds: selectedOptions });
+    votePoll.mutate({ pollId: poll.id, optionIds: selectedOptions }, {
+      onSuccess: () => setIsChangingVote(false),
+    });
   };
 
   const handleClosePoll = () => {
@@ -96,14 +101,14 @@ export function PollMessage({ poll, currentUserId, isCreator, isAdmin }: PollMes
             <div key={option.id} className="relative">
               <button
                 onClick={() => handleOptionToggle(option.id)}
-                disabled={!canVote}
+                disabled={!showSelectors}
                 className={`
                   w-full text-left rounded-lg border transition-all duration-150 relative overflow-hidden
-                  ${canVote
+                  ${showSelectors
                     ? 'cursor-pointer hover:border-primary/70 active:scale-[0.99]'
                     : 'cursor-default'
                   }
-                  ${isSelected && canVote
+                  ${isSelected && showSelectors
                     ? 'border-primary bg-primary/8 dark:bg-primary/15'
                     : hasUserVoted && hasVoted
                       ? 'border-primary/50 bg-primary/5 dark:bg-primary/10'
@@ -126,7 +131,7 @@ export function PollMessage({ poll, currentUserId, isCreator, isAdmin }: PollMes
 
                 <div className="relative flex items-center gap-3 px-3 py-2.5">
                   {/* Radio / check indicator */}
-                  {canVote && (
+                  {showSelectors && (
                     <div
                       className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center transition-all
                         ${isSelected
@@ -196,7 +201,18 @@ export function PollMessage({ poll, currentUserId, isCreator, isAdmin }: PollMes
         </div>
 
         <div className="flex items-center gap-2">
-          {canVote && !hasVoted && selectedOptions.length > 0 && (
+          {canVote && hasVoted && !isChangingVote && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => { setIsChangingVote(true); setSelectedOptions(poll.userVotes || []); }}
+              className="h-7 text-xs px-3"
+            >
+              Change vote
+            </Button>
+          )}
+
+          {showSelectors && selectedOptions.length > 0 && (
             <Button
               size="sm"
               onClick={handleVote}

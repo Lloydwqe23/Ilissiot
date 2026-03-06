@@ -145,3 +145,30 @@
     scrollbar-width: none;
   }
 }
+
+/* Typing indicator wave dots */
+@keyframes typingDot {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-3px); opacity: 1; }
+}
+
+.animate-typing-dot-1 { animation: typingDot 1.2s ease-in-out infinite; }
+.animate-typing-dot-2 { animation: typingDot 1.2s ease-in-out 0.15s infinite; }
+.animate-typing-dot-3 { animation: typingDot 1.2s ease-in-out 0.3s infinite; }
+
+/* Spoiler text — hidden until clicked */
+.spoiler-text {
+  background-color: hsl(var(--foreground));
+  color: transparent;
+  border-radius: 4px;
+  padding: 0 2px;
+  cursor: pointer;
+  transition: background-color 0.3s ease, color 0.3s ease;
+  user-select: none;
+}
+.spoiler-text.revealed {
+  background-color: hsl(var(--muted));
+  color: hsl(var(--foreground));
+  user-select: auto;
+  cursor: text;
+}

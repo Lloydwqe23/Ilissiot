@@ -86,12 +86,14 @@ export async function registerRoutes(
           const payload = message.payload as { chatId: number };
           const chat = await storage.getChat(payload.chatId);
           if (chat && currentUserId) {
+            const typingMember = chat.members.find(m => m.userId === currentUserId);
+            const userName = typingMember?.user?.firstName || 'Someone';
             chat.members.forEach(member => {
               if (member.userId !== currentUserId) {
                 // userId should always be set for chat members
                 sendToUser(member.userId!, {
                   type: message.type,
-                  payload: { chatId: payload.chatId, userId: currentUserId }
+                  payload: { chatId: payload.chatId, userId: currentUserId, userName }
                 });
               }
             });
@@ -362,7 +364,14 @@ export async function registerRoutes(
       const chat = await storage.getChat(chatId);
       if (!chat) return res.status(404).json({ message: "Chat not found" });
       if (!chat.isGroup) return res.status(400).json({ message: "Not a group chat" });
-      if (!chat.members.some(m => m.userId === userId)) return res.status(401).json({ message: "Unauthorized" });
+      const member = chat.members.find(m => m.userId === userId);
+      if (!member) return res.status(401).json({ message: "Unauthorized" });
+
+      // Only admins or members with canEditInfo permission can edit group info
+      const perms = (member.permissions || {}) as Record<string, boolean>;
+      if (member.role !== 'admin' && !perms.canEditInfo) {
+        return res.status(403).json({ message: "You don't have permission to edit group info" });
+      }
 
       const updated = await storage.updateGroupChat(chatId, input);
       res.json(updated);
@@ -395,6 +404,16 @@ export async function registerRoutes(
     }
   });
 
+  // Helper: resolve the effective creator of a group chat
+  // Falls back to the earliest-joined admin if creatorId is not set (legacy groups)
+  function getEffectiveCreatorId(chat: any): string | null {
+    if (chat.creatorId) return chat.creatorId;
+    const admins = chat.members
+      .filter((m: any) => m.role === 'admin')
+      .sort((a: any, b: any) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime());
+    return admins.length > 0 ? admins[0].userId : null;
+  }
+
   // Remove member from group chat
   app.delete('/api/chats/:chatId/members/:userId', isAuthenticated, async (req: any, res) => {
     try {
@@ -411,6 +430,11 @@ export async function registerRoutes(
       if (!currentMember) return res.status(401).json({ message: "Unauthorized" });
       if (targetUserId !== currentUserId && currentMember.role !== 'admin') {
         return res.status(403).json({ message: "Only admins can remove members" });
+      }
+      // Protect the original creator from being removed by other admins
+      const effectiveCreator = getEffectiveCreatorId(chat);
+      if (targetUserId !== currentUserId && effectiveCreator && targetUserId === effectiveCreator) {
+        return res.status(403).json({ message: "Cannot remove the group creator" });
       }
 
       await storage.removeGroupMember(chatId, targetUserId);
@@ -432,10 +456,144 @@ export async function registerRoutes(
       if (!chat.isGroup) return res.status(400).json({ message: "Not a group chat" });
       if (!chat.members.some(m => m.userId === userId)) return res.status(401).json({ message: "Unauthorized" });
 
+      const leavingMember = chat.members.find(m => m.userId === userId);
+      const wasAdmin = leavingMember?.role === 'admin';
+      const wasCreator = getEffectiveCreatorId(chat) === userId;
+
       await storage.removeGroupMember(chatId, userId);
+
+      // After removal, check remaining members and handle admin succession
+      const remainingMembers = chat.members.filter(m => m.userId !== userId);
+      if (remainingMembers.length === 0) {
+        // No members left — delete the group entirely
+        await storage.deleteChat(chatId);
+      } else if (wasAdmin) {
+        const remainingAdmins = remainingMembers.filter(m => m.role === 'admin');
+        if (remainingAdmins.length === 0) {
+          // No admins left — promote the earliest-joined member
+          const sorted = [...remainingMembers].sort(
+            (a, b) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime()
+          );
+          const newAdmin = sorted[0];
+          await storage.updateMemberRole(chatId, newAdmin.userId, 'admin');
+          // Transfer creatorId to the new admin
+          await storage.updateChatCreator(chatId, newAdmin.userId);
+        } else if (wasCreator) {
+          // Creator is leaving but other admins exist — transfer creatorId to earliest admin
+          const sortedAdmins = [...remainingAdmins].sort(
+            (a, b) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime()
+          );
+          await storage.updateChatCreator(chatId, sortedAdmins[0].userId);
+        }
+      }
+
       res.json({ success: true });
     } catch (err) {
       console.error("Leave group error:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Update member role (promote/demote admin)
+  app.patch('/api/chats/:chatId/members/:userId/role', isAuthenticated, async (req: any, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const currentUserId = req.user.claims.sub;
+      const targetUserId = req.params.userId;
+      const { role } = req.body as { role: string };
+
+      if (!role || !['admin', 'member'].includes(role)) {
+        return res.status(400).json({ message: "Role must be 'admin' or 'member'" });
+      }
+
+      const chat = await storage.getChat(chatId);
+      if (!chat) return res.status(404).json({ message: "Chat not found" });
+      if (!chat.isGroup) return res.status(400).json({ message: "Not a group chat" });
+
+      const currentMember = chat.members.find(m => m.userId === currentUserId);
+      if (!currentMember || currentMember.role !== 'admin') {
+        return res.status(403).json({ message: "Only admins can change roles" });
+      }
+      if (!chat.members.some(m => m.userId === targetUserId)) {
+        return res.status(404).json({ message: "Member not found" });
+      }
+      // Protect creator's role
+      const effectiveCreatorRole = getEffectiveCreatorId(chat);
+      if (effectiveCreatorRole && targetUserId === effectiveCreatorRole && role !== 'admin') {
+        return res.status(403).json({ message: "Cannot demote the group creator" });
+      }
+
+      const updated = await storage.updateMemberRole(chatId, targetUserId, role);
+      res.json(updated);
+    } catch (err) {
+      console.error("Update member role error:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Update member title
+  app.patch('/api/chats/:chatId/members/:userId/title', isAuthenticated, async (req: any, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const currentUserId = req.user.claims.sub;
+      const targetUserId = req.params.userId;
+      const { title } = req.body as { title: string | null };
+
+      const chat = await storage.getChat(chatId);
+      if (!chat) return res.status(404).json({ message: "Chat not found" });
+      if (!chat.isGroup) return res.status(400).json({ message: "Not a group chat" });
+
+      const currentMember = chat.members.find(m => m.userId === currentUserId);
+      if (!currentMember || currentMember.role !== 'admin') {
+        return res.status(403).json({ message: "Only admins can set titles" });
+      }
+      if (!chat.members.some(m => m.userId === targetUserId)) {
+        return res.status(404).json({ message: "Member not found" });
+      }
+      // Protect creator's title from other admins
+      const effectiveCreatorTitle = getEffectiveCreatorId(chat);
+      if (effectiveCreatorTitle && targetUserId === effectiveCreatorTitle && currentUserId !== effectiveCreatorTitle) {
+        return res.status(403).json({ message: "Cannot change the group creator's title" });
+      }
+
+      const trimmed = title?.trim() || null;
+      const updated = await storage.updateMemberTitle(chatId, targetUserId, trimmed);
+      res.json(updated);
+    } catch (err) {
+      console.error("Update member title error:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Update member permissions
+  app.patch('/api/chats/:chatId/members/:userId/permissions', isAuthenticated, async (req: any, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const currentUserId = req.user.claims.sub;
+      const targetUserId = req.params.userId;
+      const { permissions } = req.body as { permissions: Record<string, boolean> };
+
+      const chat = await storage.getChat(chatId);
+      if (!chat) return res.status(404).json({ message: "Chat not found" });
+      if (!chat.isGroup) return res.status(400).json({ message: "Not a group chat" });
+
+      const currentMember = chat.members.find(m => m.userId === currentUserId);
+      if (!currentMember || currentMember.role !== 'admin') {
+        return res.status(403).json({ message: "Only admins can change permissions" });
+      }
+      if (!chat.members.some(m => m.userId === targetUserId)) {
+        return res.status(404).json({ message: "Member not found" });
+      }
+      // Protect creator's permissions
+      const effectiveCreatorPerm = getEffectiveCreatorId(chat);
+      if (effectiveCreatorPerm && targetUserId === effectiveCreatorPerm && currentUserId !== effectiveCreatorPerm) {
+        return res.status(403).json({ message: "Cannot change the group creator's permissions" });
+      }
+
+      const updated = await storage.updateMemberPermissions(chatId, targetUserId, permissions);
+      res.json(updated);
+    } catch (err) {
+      console.error("Update member permissions error:", err);
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -667,7 +825,7 @@ export async function registerRoutes(
     }
   });
 
-  // Delete chat
+  // Delete chat (for DMs: hide for user; for groups: only effective creator can delete entirely)
   app.delete('/api/chats/:chatId', isAuthenticated, async (req: any, res) => {
     try {
       const chatId = Number(req.params.chatId);
@@ -681,9 +839,27 @@ export async function registerRoutes(
         return res.status(401).json({ message: "Unauthorized" });
       }
 
-      await storage.leaveChatForUser(chatId, userId);
+      if (chat.isGroup) {
+        // Only the effective creator can delete a group
+        const effectiveCreator = getEffectiveCreatorId(chat);
+        if (effectiveCreator !== userId) {
+          return res.status(403).json({ message: "Only the group creator can delete the group" });
+        }
+        // Collect member IDs before deletion to broadcast
+        const memberIds = chat.members.map(m => m.userId).filter(id => id !== userId);
+        console.log(`[DELETE GROUP] User ${userId} deleting group chat ${chatId}`);
+        await storage.deleteChat(chatId);
+        console.log(`[DELETE GROUP] Group chat ${chatId} deleted successfully`);
+        // Notify all other members via WS so their UI updates immediately
+        for (const memberId of memberIds) {
+          sendToUser(memberId, { type: WS_EVENTS.CHAT_DELETED, payload: { chatId } });
+        }
+      } else {
+        await storage.leaveChatForUser(chatId, userId);
+      }
       res.json({ success: true });
     } catch (err) {
+      console.error("Delete chat error:", err);
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -1143,7 +1319,7 @@ export async function registerRoutes(
         chat.members.forEach(member => {
           sendToUser(member.userId!, {
             type: WS_EVENTS.POLL_VOTE,
-            payload: { pollId, userId: poll.isAnonymous ? undefined : userId, optionIds },
+            payload: { pollId, chatId: poll.chatId, userId: poll.isAnonymous ? undefined : userId, optionIds },
           });
         });
       }
@@ -1175,7 +1351,7 @@ export async function registerRoutes(
         chat.members.forEach(member => {
           sendToUser(member.userId!, {
             type: WS_EVENTS.POLL_CLOSE,
-            payload: { pollId },
+            payload: { pollId, chatId: poll.chatId },
           });
         });
       }

@@ -3,6 +3,7 @@ import { Link, useRoute, useLocation } from "wouter";
 import { format, isToday, isYesterday } from "date-fns";
 import { Edit, LogOut, Settings, MoreVertical, ArrowLeft, Image, Mic, Video, Phone, FileText, Sticker, Pin, PinOff, LogOut as LeaveIcon, Users } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { stripFormatting } from "@/lib/format-message";
 import { useChats, useDeleteChat, useBlockUser, useUnblockUser, useBlockStatus, usePinChat, useUnpinChat, useLeaveGroup } from "@/hooks/use-chats";
 import { useUserStatus } from "@/hooks/use-user-status";
 import { 
@@ -124,7 +125,7 @@ function ChatSidebarItem({
                 const hasForward = (lastMsg.attachments || []).some((a: any) => a.type === 'forward');
                 const forwardPrefix = hasForward ? '↗ ' : '';
                 if (lastMsg.content && lastMsg.content.trim()) {
-                  return `${prefix}${forwardPrefix}${lastMsg.content}`;
+                  return `${prefix}${forwardPrefix}${stripFormatting(lastMsg.content)}`;
                 }
                 if (attachments.length > 0) {
                   const first = attachments[0];

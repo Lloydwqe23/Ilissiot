@@ -51,6 +51,7 @@ interface IStorage {
   removeGroupMember(chatId: number, userId: string): Promise<void>;
   deleteChat(chatId: number): Promise<void>;
   leaveChatForUser(chatId: number, userId: string): Promise<void>;
+  updateChatCreator(chatId: number, userId: string): Promise<void>;
   
   // Message operations
   getMessagesForChat(chatId: number, userId: string, limit?: number): Promise<MessageWithSender[]>;
@@ -319,16 +320,18 @@ export class DatabaseStorage implements IStorage {
     // Create the group chat
     const [chat] = await db
       .insert(chats)
-      .values({ isGroup: true, name })
+      .values({ isGroup: true, name, creatorId })
       .returning();
 
     // Add creator as admin + all other members
+    const defaultPerms = { canPin: true, canInvite: true, canCreatePolls: true };
     const allMemberIds = [creatorId, ...memberIds.filter(id => id !== creatorId)];
     await db.insert(chatMembers).values(
       allMemberIds.map((userId, i) => ({
         chatId: chat.id,
         userId,
         role: i === 0 ? 'admin' : 'member',
+        permissions: i === 0 ? {} : defaultPerms,
       }))
     );
 
@@ -354,11 +357,13 @@ export class DatabaseStorage implements IStorage {
 
     const newMembers = userIds.filter(id => !existingIds.has(id));
     if (newMembers.length > 0) {
+      const defaultPerms = { canPin: true, canInvite: true, canCreatePolls: true };
       await db.insert(chatMembers).values(
         newMembers.map(userId => ({
           chatId,
           userId,
           role: 'member',
+          permissions: defaultPerms,
         }))
       );
     }
@@ -375,6 +380,45 @@ export class DatabaseStorage implements IStorage {
           eq(chatMembers.userId, userId)
         )
       );
+  }
+
+  async updateMemberRole(chatId: number, userId: string, role: string): Promise<ChatWithMembers> {
+    await db
+      .update(chatMembers)
+      .set({ role })
+      .where(
+        and(
+          eq(chatMembers.chatId, chatId),
+          eq(chatMembers.userId, userId)
+        )
+      );
+    return this.getChat(chatId) as Promise<ChatWithMembers>;
+  }
+
+  async updateMemberTitle(chatId: number, userId: string, title: string | null): Promise<ChatWithMembers> {
+    await db
+      .update(chatMembers)
+      .set({ title })
+      .where(
+        and(
+          eq(chatMembers.chatId, chatId),
+          eq(chatMembers.userId, userId)
+        )
+      );
+    return this.getChat(chatId) as Promise<ChatWithMembers>;
+  }
+
+  async updateMemberPermissions(chatId: number, userId: string, permissions: Record<string, boolean>): Promise<ChatWithMembers> {
+    await db
+      .update(chatMembers)
+      .set({ permissions })
+      .where(
+        and(
+          eq(chatMembers.chatId, chatId),
+          eq(chatMembers.userId, userId)
+        )
+      );
+    return this.getChat(chatId) as Promise<ChatWithMembers>;
   }
 
   async pinChat(chatId: number, userId: string): Promise<void> {
@@ -778,21 +822,50 @@ export class DatabaseStorage implements IStorage {
     }));
   }
 
-  async deleteChat(chatId: number): Promise<void> {
-    // Delete all messages first (cascade might do this, but explicit is better)
+  async updateChatCreator(chatId: number, userId: string): Promise<void> {
     await db
-      .delete(messages)
-      .where(eq(messages.chatId, chatId));
-    
-    // Delete all chat members
-    await db
-      .delete(chatMembers)
-      .where(eq(chatMembers.chatId, chatId));
-    
-    // Delete the chat
-    await db
-      .delete(chats)
+      .update(chats)
+      .set({ creatorId: userId })
       .where(eq(chats.id, chatId));
+  }
+
+  async deleteChat(chatId: number): Promise<void> {
+    // Delete all related data explicitly in correct order
+    // 1. Poll votes (reference polls)
+    const chatPolls = await db
+      .select({ id: polls.id })
+      .from(polls)
+      .where(eq(polls.chatId, chatId));
+    const pollIds = chatPolls.map(p => p.id);
+    if (pollIds.length > 0) {
+      await db.delete(pollVotes).where(inArray(pollVotes.pollId, pollIds));
+      await db.delete(polls).where(inArray(polls.id, pollIds));
+    }
+
+    // 2. Pinned messages
+    await db.delete(pinnedMessages).where(eq(pinnedMessages.chatId, chatId));
+
+    // 3. Group invite links
+    await db.delete(groupInviteLinks).where(eq(groupInviteLinks.chatId, chatId));
+
+    // 4. Message reactions (reference messages)
+    const chatMessages = await db
+      .select({ id: messages.id })
+      .from(messages)
+      .where(eq(messages.chatId, chatId));
+    const messageIds = chatMessages.map(m => m.id);
+    if (messageIds.length > 0) {
+      await db.delete(messageReactions).where(inArray(messageReactions.messageId, messageIds));
+    }
+
+    // 5. Messages
+    await db.delete(messages).where(eq(messages.chatId, chatId));
+
+    // 6. Chat members
+    await db.delete(chatMembers).where(eq(chatMembers.chatId, chatId));
+
+    // 7. Finally delete the chat itself
+    await db.delete(chats).where(eq(chats.id, chatId));
   }
 
   // A01: Verify that a user is a member of the chat that owns a message
@@ -848,11 +921,6 @@ export class DatabaseStorage implements IStorage {
     
     const member = chat.members.find(m => m.userId === userId);
     if (!member) throw new Error('Not a chat member');
-    
-    // In group chats, only admins can pin
-    if (chat.isGroup && member.role !== 'admin') {
-      throw new Error('Only admins can pin messages in groups');
-    }
     
     // Verify message exists and belongs to this chat
     const [message] = await db
@@ -920,11 +988,6 @@ export class DatabaseStorage implements IStorage {
     
     const member = chat.members.find(m => m.userId === userId);
     if (!member) throw new Error('Not a chat member');
-    
-    // In group chats, only admins can unpin
-    if (chat.isGroup && member.role !== 'admin') {
-      throw new Error('Only admins can unpin messages in groups');
-    }
     
     // Delete the pinned message
     const result = await db

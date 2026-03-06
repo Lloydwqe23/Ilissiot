@@ -203,6 +203,75 @@ export function useLeaveGroup() {
   });
 }
 
+export function useUpdateMemberRole() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ chatId, userId, role }: { chatId: number; userId: string; role: string }) => {
+      const res = await fetch(`/api/chats/${chatId}/members/${userId}/role`, {
+        method: 'PATCH',
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role }),
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || 'Failed to update role');
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.chats.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.chats.get.path] });
+    }
+  });
+}
+
+export function useUpdateMemberTitle() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ chatId, userId, title }: { chatId: number; userId: string; title: string | null }) => {
+      const res = await fetch(`/api/chats/${chatId}/members/${userId}/title`, {
+        method: 'PATCH',
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || 'Failed to update title');
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.chats.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.chats.get.path] });
+    }
+  });
+}
+
+export function useUpdateMemberPermissions() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ chatId, userId, permissions }: { chatId: number; userId: string; permissions: Record<string, boolean> }) => {
+      const res = await fetch(`/api/chats/${chatId}/members/${userId}/permissions`, {
+        method: 'PATCH',
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ permissions }),
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || 'Failed to update permissions');
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.chats.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.chats.get.path] });
+    }
+  });
+}
+
 // blocking hooks
 export function useBlockUser() {
   const queryClient = useQueryClient();
@@ -494,7 +563,7 @@ export function useVotePoll() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['poll', data.id] });
-      queryClient.invalidateQueries({ queryKey: ['messages', data.chatId] });
+      queryClient.invalidateQueries({ queryKey: [api.messages.list.path, String(data.chatId)] });
     },
   });
 }
@@ -515,7 +584,7 @@ export function useClosePoll() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['poll', data.id] });
-      queryClient.invalidateQueries({ queryKey: ['messages', data.chatId] });
+      queryClient.invalidateQueries({ queryKey: [api.messages.list.path, String(data.chatId)] });
     },
   });
 }

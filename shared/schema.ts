@@ -41,6 +41,7 @@ export const chats = pgTable("chats", {
   isGroup: boolean("is_group").default(false),
   name: text("name"), // Only for group chats
   avatarUrl: text("avatar_url"), // Only for group chats
+  creatorId: varchar("creator_id").references(() => users.id, { onDelete: "set null" }), // Original group creator
   hiddenBy: jsonb("hidden_by").default(sql`'[]'::jsonb`), // Array of userIds who "deleted" this chat for themselves
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
@@ -51,6 +52,8 @@ export const chatMembers = pgTable("chat_members", {
   chatId: serial("chat_id").references(() => chats.id, { onDelete: "cascade" }),
   userId: varchar("user_id").references(() => users.id, { onDelete: "cascade" }),
   role: varchar("role", { length: 20 }).default('member'), // admin, member
+  title: varchar("title", { length: 100 }), // custom title/badge displayed next to name
+  permissions: jsonb("permissions").default(sql`'{}'::jsonb`), // custom permissions object
   joinedAt: timestamp("joined_at", { withTimezone: true }).defaultNow(),
   pinnedAt: timestamp("pinned_at", { withTimezone: true }),
 });
@@ -313,6 +316,8 @@ export const WS_EVENTS = {
   CALL_HANGUP: 'call:hangup',
   CALL_REJECT: 'call:reject',
   CALL_BUSY: 'call:busy',
+  // Chat lifecycle
+  CHAT_DELETED: 'chat:deleted',
 } as const;
 
 export interface WsMessage<T = unknown> {
