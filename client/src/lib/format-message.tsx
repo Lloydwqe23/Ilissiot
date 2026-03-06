@@ -1,5 +1,9 @@
 import type { ReactNode } from "react";
 
+type FormatMessageOptions = {
+  onMentionClick?: (username: string) => void;
+};
+
 /**
  * Parses chat markup and returns formatted React elements.
  *
@@ -27,6 +31,7 @@ const UNDERLINE = /__(.+?)__/;
 const BOLD = /\*(.+?)\*/;
 const ITALIC = /(?<![a-zA-Z0-9])_(.+?)_(?![a-zA-Z0-9])/;
 const STRIKE = /~(.+?)~/;
+const MENTION = /(?<![\w.])@([a-z0-9_]{3,32})/;
 const URL_RE = /(https?:\/\/[^\s<>"']+)/;
 
 // Combined pattern source — order determines priority
@@ -39,7 +44,8 @@ const COMBINED_SOURCE = [
   BOLD.source,           // group 7
   ITALIC.source,         // group 8
   STRIKE.source,         // group 9
-  URL_RE.source,         // group 10
+  MENTION.source,        // group 10
+  URL_RE.source,         // group 11
 ].join("|");
 
 let keyCounter = 0;
@@ -50,7 +56,7 @@ function k() {
 /**
  * Recursively format inline text (everything except code-block and blockquote).
  */
-function formatInline(text: string): ReactNode[] {
+function formatInline(text: string, options?: FormatMessageOptions): ReactNode[] {
   const nodes: ReactNode[] = [];
   let lastIndex = 0;
 
@@ -65,7 +71,7 @@ function formatInline(text: string): ReactNode[] {
       nodes.push(text.slice(lastIndex, match.index));
     }
 
-    const [full, codeBlock, inlineCode, linkText, linkUrl, spoiler, underline, bold, italic, strike, url] = match;
+    const [full, codeBlock, inlineCode, linkText, linkUrl, spoiler, underline, bold, italic, strike, mention, url] = match;
 
     if (codeBlock !== undefined) {
       nodes.push(
@@ -98,17 +104,40 @@ function formatInline(text: string): ReactNode[] {
           e.stopPropagation();
           (e.currentTarget as HTMLElement).classList.add("revealed");
         }}>
-          {formatInline(spoiler)}
+          {formatInline(spoiler, options)}
         </span>,
       );
     } else if (underline !== undefined) {
-      nodes.push(<u key={k()}>{formatInline(underline)}</u>);
+      nodes.push(<u key={k()}>{formatInline(underline, options)}</u>);
     } else if (bold !== undefined) {
-      nodes.push(<strong key={k()}>{formatInline(bold)}</strong>);
+      nodes.push(<strong key={k()}>{formatInline(bold, options)}</strong>);
     } else if (italic !== undefined) {
-      nodes.push(<em key={k()}>{formatInline(italic)}</em>);
+      nodes.push(<em key={k()}>{formatInline(italic, options)}</em>);
     } else if (strike !== undefined) {
-      nodes.push(<s key={k()}>{formatInline(strike)}</s>);
+      nodes.push(<s key={k()}>{formatInline(strike, options)}</s>);
+    } else if (mention !== undefined) {
+      nodes.push(
+        options?.onMentionClick ? (
+          <button
+            key={k()}
+            type="button"
+            className="font-semibold text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/40 px-1.5 py-0.5 rounded hover:bg-blue-200 dark:hover:bg-blue-900/60 transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              options.onMentionClick?.(mention);
+            }}
+          >
+            @{mention}
+          </button>
+        ) : (
+          <span
+            key={k()}
+            className="font-semibold text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/40 px-1.5 py-0.5 rounded"
+          >
+            @{mention}
+          </span>
+        ),
+      );
     } else if (url !== undefined) {
       nodes.push(
         <a
@@ -139,7 +168,7 @@ function formatInline(text: string): ReactNode[] {
  * Top-level formatter — handles block-level elements first (blockquotes),
  * then delegates to `formatInline` for everything else.
  */
-export function formatMessageContent(text: string): ReactNode[] {
+export function formatMessageContent(text: string, options?: FormatMessageOptions): ReactNode[] {
   // Reset key counter for each message
   keyCounter = 0;
 
@@ -155,7 +184,7 @@ export function formatMessageContent(text: string): ReactNode[] {
         key={k()}
         className="border-l-[3px] border-primary/60 pl-3 my-1 text-muted-foreground italic"
       >
-        {formatInline(content)}
+        {formatInline(content, options)}
       </blockquote>,
     );
     quoteBuffer = [];
@@ -174,7 +203,7 @@ export function formatMessageContent(text: string): ReactNode[] {
           result.push(<br key={k()} />);
         }
       }
-      result.push(...formatInline(line));
+      result.push(...formatInline(line, options));
     }
   }
   flushQuote();

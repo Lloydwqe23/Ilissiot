@@ -21,14 +21,17 @@ export function useSearchUsers(query: string) {
 export function useUpdateProfile() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (updates: { firstName?: string; lastName?: string; bio?: string | null; birthday?: string | null; profileImageUrl?: string | null; theme?: 'light' | 'dark' }) => {
+    mutationFn: async (updates: { username?: string; firstName?: string; lastName?: string; bio?: string | null; birthday?: string | null; profileImageUrl?: string | null; theme?: 'light' | 'dark' }) => {
       const res = await fetch(api.users.updateProfile.path, {
         method: api.users.updateProfile.method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
         credentials: "include",
       });
-      if (!res.ok) throw new Error("Failed to update profile");
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ message: "Failed to update profile" }));
+        throw new Error(errorData.message || "Failed to update profile");
+      }
       return api.users.updateProfile.responses[200].parse(await res.json());
     },
     onSuccess: (data) => {

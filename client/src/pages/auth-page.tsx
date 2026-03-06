@@ -14,6 +14,7 @@ export function AuthPage() {
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
   const [registerForm, setRegisterForm] = useState({
     email: "",
+    username: "",
     password: "",
     confirmPassword: "",
     firstName: "",
@@ -55,6 +56,12 @@ export function AuthPage() {
       return;
     }
 
+    const normalizedUsername = registerForm.username.trim().toLowerCase();
+    if (!/^[a-z0-9_]{3,32}$/.test(normalizedUsername)) {
+      setError("Username must be 3-32 chars: a-z, 0-9, _");
+      return;
+    }
+
     if (registerForm.password.length < 6) {
       setError("Password must be at least 6 characters");
       return;
@@ -68,6 +75,7 @@ export function AuthPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: registerForm.email,
+          username: normalizedUsername,
           password: registerForm.password,
           firstName: registerForm.firstName || null,
           lastName: registerForm.lastName || null,
@@ -223,6 +231,21 @@ export function AuthPage() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2 col-span-2">
+                    <Label htmlFor="username">Username</Label>
+                    <Input
+                      id="username"
+                      placeholder="username"
+                      value={registerForm.username}
+                      onChange={(e) =>
+                        setRegisterForm({
+                          ...registerForm,
+                          username: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""),
+                        })
+                      }
+                      required
+                    />
+                  </div>
                   <div className="space-y-2">
                     <Label htmlFor="firstName">First Name</Label>
                     <Input

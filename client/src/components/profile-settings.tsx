@@ -23,6 +23,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
   
   const [firstName, setFirstName] = useState(user?.firstName || "");
   const [lastName, setLastName] = useState(user?.lastName || "");
+  const [username, setUsername] = useState(user?.username || "");
   const [bio, setBio] = useState(user?.bio || "");
   const [birthday, setBirthday] = useState(user?.birthday || "");
   const [profileImageUrl, setProfileImageUrl] = useState(user?.profileImageUrl || "");
@@ -47,6 +48,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
     if (open && user) {
       setFirstName(user.firstName || "");
       setLastName(user.lastName || "");
+      setUsername(user.username || "");
       setBio(user.bio || "");
       setBirthday(user.birthday || "");
       setProfileImageUrl(user.profileImageUrl || "");
@@ -150,6 +152,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
 
   const handleSave = () => {
     updateProfile.mutate({
+      username: username.trim().toLowerCase(),
       firstName,
       lastName,
       bio: bio.trim() || null,
@@ -173,7 +176,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[425px] rounded-2xl p-0 overflow-hidden border-border/50 shadow-2xl" aria-describedby={undefined}>
+      <DialogContent className="sm:max-w-[425px] max-h-[90vh] rounded-2xl p-0 overflow-hidden border-border/50 shadow-2xl flex flex-col" aria-describedby={undefined}>
         <DialogHeader className="p-6 bg-muted/30 border-b border-border/50">
           <DialogTitle className="text-2xl font-display">Profile Settings</DialogTitle>
           <div className="mt-2 flex space-x-4">
@@ -194,7 +197,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
           </div>
         </DialogHeader>
         
-        <div className="p-6 space-y-6">
+        <div className="p-6 space-y-6 overflow-y-auto min-h-0">
           {view === 'blocked' ? (
             <div>
               {blockedUsersQuery.isLoading && <Loader2 className="animate-spin" />}
@@ -309,6 +312,18 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
                     className="rounded-xl bg-muted/50 border-transparent focus:bg-background focus:border-primary transition-all"
                   />
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="username">Username</Label>
+                <Input
+                  id="username"
+                  value={username}
+                  onChange={e => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                  placeholder="username"
+                  className="rounded-xl bg-muted/50 border-transparent focus:bg-background focus:border-primary transition-all"
+                />
+                <p className="text-xs text-muted-foreground">Used for mentions, for example @username</p>
               </div>
 
               <div className="space-y-2">

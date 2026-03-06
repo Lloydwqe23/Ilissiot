@@ -44,6 +44,9 @@ export function UserProfileModal({
             </Avatar>
             <div className="text-center">
               <DialogTitle className="text-2xl">{displayName}</DialogTitle>
+              {user.username && (
+                <p className="text-sm text-primary mt-1">@{user.username}</p>
+              )}
               <p className="text-sm text-muted-foreground mt-1">{user.email}</p>
             </div>
           </div>

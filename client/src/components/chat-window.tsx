@@ -1178,6 +1178,17 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  const openProfileByUsername = (username: string) => {
+    if (!chat?.members?.length) return;
+    const normalized = username.toLowerCase();
+    const matchedMember = chat.members.find(
+      (m) => m.user?.username?.toLowerCase() === normalized
+    );
+    if (!matchedMember?.user) return;
+    setProfileUser(matchedMember.user);
+    setProfileModalOpen(true);
+  };
+
   // Auto scroll to bottom
   useEffect(() => {
     if (messagesEndRef.current) {
@@ -2495,7 +2506,9 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                           );
                         }
                         // Apply highlighting only to text content when searching
-                        const displayContent = isSearching && allMatches.length > 0 ? highlightText(msg.content) : formatMessageContent(msg.content);
+                        const displayContent = isSearching && allMatches.length > 0
+                          ? highlightText(msg.content)
+                          : formatMessageContent(msg.content, { onMentionClick: openProfileByUsername });
                         return <div className="text-[15px] leading-relaxed break-words">{displayContent}</div>;
                       })()}
 

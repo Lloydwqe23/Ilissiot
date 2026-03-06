@@ -10,6 +10,7 @@ export { WS_EVENTS, type WsMessage };
 export const userSchema = z.object({
   id: z.string(),
   email: z.string().nullable().optional(),
+  username: z.string().nullable().optional(),
   firstName: z.string().nullable(),
   lastName: z.string().nullable(),
   profileImageUrl: z.string().nullable(),
@@ -138,6 +139,7 @@ export const api = {
       method: 'PATCH' as const,
       path: '/api/users/profile' as const,
       input: z.object({
+        username: z.string().trim().toLowerCase().regex(/^[a-z0-9_]{3,32}$/).optional(),
         firstName: z.string().optional(),
         lastName: z.string().optional(),
         bio: z.string().nullable().optional(),

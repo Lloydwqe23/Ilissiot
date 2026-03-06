@@ -192,7 +192,7 @@ export function UserSearch({ open, onOpenChange }: { open: boolean; onOpenChange
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input 
               autoFocus
-              placeholder="Search by name or email..." 
+              placeholder="Search by username..." 
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               className="pl-9 rounded-xl bg-muted/50 border-transparent focus:bg-background focus:border-primary transition-all h-11"
@@ -250,7 +250,7 @@ export function UserSearch({ open, onOpenChange }: { open: boolean; onOpenChange
                     </div>
                     <div className="flex-1 overflow-hidden">
                       <p className="font-medium truncate group-hover:text-primary transition-colors">{name}</p>
-                      {u.bio && <p className="text-xs text-muted-foreground truncate">{u.bio}</p>}
+                      <p className="text-xs text-muted-foreground truncate">@{u.username || 'unknown'}</p>
                     </div>
                   </button>
                 )

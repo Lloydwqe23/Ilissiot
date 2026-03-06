@@ -123,16 +123,15 @@ export class DatabaseStorage implements IStorage {
     return rows.map(r => sanitizeUser(r.users)) as User[];
   }
   async searchUsers(query: string, currentUserId: string): Promise<User[]> {
+    const normalizedQuery = query.trim().replace(/^@/, '').toLowerCase();
+    if (!normalizedQuery) return [];
+
     // Exclude yourself and any users you've blocked or who have blocked you
     const rows = await db.select()
       .from(users)
       .where(
         and(
-          or(
-            ilike(users.firstName, `%${query}%`),
-            ilike(users.lastName, `%${query}%`),
-            ilike(users.email, `%${query}%`)
-          ),
+          ilike(users.username, `%${normalizedQuery}%`),
           sql`${users.id} != ${currentUserId}`,
           sql`NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker_id = ${currentUserId} AND b.blocked_id = ${users.id}) OR (b.blocker_id = ${users.id} AND b.blocked_id = ${currentUserId}))`
         )
@@ -142,9 +141,28 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateUser(id: string, updates: Partial<User>): Promise<User> {
+    const nextUpdates = { ...updates } as Partial<User>;
+
+    if (typeof nextUpdates.username === 'string') {
+      nextUpdates.username = nextUpdates.username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '') as any;
+      if (!/^[a-z0-9_]{3,32}$/.test(nextUpdates.username as string)) {
+        throw new Error('Invalid username format');
+      }
+
+      const [existing] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.username, nextUpdates.username as string))
+        .limit(1);
+
+      if (existing && existing.id !== id) {
+        throw new Error('Username already taken');
+      }
+    }
+
     const [user] = await db
       .update(users)
-      .set({ ...updates, updatedAt: new Date() })
+      .set({ ...nextUpdates, updatedAt: new Date() })
       .where(eq(users.id, id))
       .returning();
     return sanitizeUser(user) as User;

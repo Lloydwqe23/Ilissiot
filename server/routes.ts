@@ -186,6 +186,9 @@ export async function registerRoutes(
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message });
       }
+      if (err instanceof Error && (err.message === 'Username already taken' || err.message === 'Invalid username format')) {
+        return res.status(400).json({ message: err.message });
+      }
       res.status(500).json({ message: "Internal server error" });
     }
   });
