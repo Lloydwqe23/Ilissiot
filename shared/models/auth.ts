@@ -21,8 +21,12 @@ export const users = pgTable("users", {
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
   bio: text("bio"),
+  birthday: varchar("birthday"), // Format: YYYY-MM-DD
   status: varchar("status", { length: 20 }).default('offline'),
-  theme: varchar("theme", { length: 10 }).default('light'),
+  theme: varchar("theme", { length: 20 }).default('light'),
+  colorTheme: varchar("color_theme", { length: 20 }).default('blue'),
+  fontType: varchar("font_type", { length: 20 }).default('inter'),
+  textSize: varchar("text_size", { length: 20 }).default('normal'),
   lastSeen: timestamp("last_seen").defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

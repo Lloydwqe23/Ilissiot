@@ -28,7 +28,7 @@ import { randomBytes } from "crypto";
  * Returns `any` intentionally – the type system's `User` includes these fields
  * but they must NOT reach the client. */
 function sanitizeUser(user: Record<string, any>): any {
-  const { password, email, theme, createdAt, updatedAt, ...safe } = user;
+  const { password, email, theme, colorTheme, fontType, textSize, createdAt, updatedAt, ...safe } = user;
   return safe;
 }
 
@@ -165,7 +165,8 @@ export class DatabaseStorage implements IStorage {
       .set({ ...nextUpdates, updatedAt: new Date() })
       .where(eq(users.id, id))
       .returning();
-    return sanitizeUser(user) as User;
+    // Return full self user record; API routes strip private fields before sending.
+    return user as User;
   }
 
   async getChatsForUser(userId: string): Promise<ChatWithMembers[]> {

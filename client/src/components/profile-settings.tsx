@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { useTheme } from "next-themes";
 import Cropper from "react-easy-crop";
 import type { Area } from "react-easy-crop";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -34,12 +33,14 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
-  const defaultTheme = user?.theme === 'dark' ? 'dark' : 'light';
-  const [theme, setTheme] = useState<'light' | 'dark'>(defaultTheme);
-  const { setTheme: applyTheme } = useTheme();
+  const defaultTheme = user?.theme || 'light';
+  const [theme, setTheme] = useState<string>(defaultTheme);
+  const [colorTheme, setColorTheme] = useState<string>(user?.colorTheme || 'blue');
+  const [fontType, setFontType] = useState<string>(user?.fontType || 'inter');
+  const [textSize, setTextSize] = useState<string>(user?.textSize || 'normal');
 
   // blocked users list view state
-  const [view, setView] = useState<'profile' | 'blocked'>('profile');
+  const [view, setView] = useState<'profile' | 'blocked' | 'design'>('profile');
   const blockedUsersQuery = useBlockedUsers();
   const unblockMut = useUnblockUser();
 
@@ -52,7 +53,10 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
       setBio(user.bio || "");
       setBirthday(user.birthday || "");
       setProfileImageUrl(user.profileImageUrl || "");
-      setTheme(user.theme === 'dark' ? 'dark' : 'light');
+      setTheme(user.theme || 'light');
+      setColorTheme(user.colorTheme || 'blue');
+      setFontType(user.fontType || 'inter');
+      setTextSize(user.textSize || 'normal');
     }
   }, [open, user]);
 
@@ -159,9 +163,32 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
       birthday: birthday || null,
       profileImageUrl: profileImageUrl || null,
       theme,
+      colorTheme,
+      fontType,
+      textSize,
     }, {
       onSuccess: () => {
-        applyTheme(theme); // Apply theme immediately
+        const appearanceClasses = ['light', 'dark', 'greenish', 'yellowish', 'blueish', 'purpleish', 'pinkish', 'orangeish'];
+        const colorThemeClasses = ['theme-blue', 'theme-green', 'theme-red', 'theme-gold', 'theme-purple', 'theme-pink', 'theme-teal', 'theme-orange', 'theme-indigo'];
+        const fontClasses = ['font-inter', 'font-poppins', 'font-lora', 'font-jetbrains', 'font-nunito', 'font-merriweather', 'font-manrope', 'font-playfair'];
+        const textSizeClasses = ['text-size-small', 'text-size-normal', 'text-size-large'];
+
+        // Apply appearance theme - remove old appearance modes first
+        document.documentElement.classList.remove(...appearanceClasses);
+        document.documentElement.classList.add(theme);
+
+        // Apply color theme
+        document.documentElement.classList.remove(...colorThemeClasses);
+        document.documentElement.classList.add(`theme-${colorTheme}`);
+
+        // Apply global font type
+        document.documentElement.classList.remove(...fontClasses);
+        document.documentElement.classList.add(`font-${fontType}`);
+
+        // Apply global text size
+        document.documentElement.classList.remove(...textSizeClasses);
+        document.documentElement.classList.add(`text-size-${textSize}`);
+
         toast({ title: "Profile updated successfully" });
         onOpenChange(false);
       },
@@ -189,6 +216,13 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
             </button>
             <button
               type="button"
+              className={`text-sm font-medium ${view === 'design' ? 'text-foreground' : 'text-muted-foreground'}`}
+              onClick={() => setView('design')}
+            >
+              Design
+            </button>
+            <button
+              type="button"
               className={`text-sm font-medium ${view === 'blocked' ? 'text-foreground' : 'text-muted-foreground'}`}
               onClick={() => setView('blocked')}
             >
@@ -198,36 +232,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
         </DialogHeader>
         
         <div className="p-6 space-y-6 overflow-y-auto min-h-0">
-          {view === 'blocked' ? (
-            <div>
-              {blockedUsersQuery.isLoading && <Loader2 className="animate-spin" />}
-              {blockedUsersQuery.data?.length === 0 && !blockedUsersQuery.isLoading && (
-                <p className="text-sm text-muted-foreground">You haven't blocked anyone.</p>
-              )}
-              {blockedUsersQuery.data?.map(u => (
-                <div key={u.id} className="flex items-center justify-between py-2">
-                  <div className="flex items-center gap-3">
-                    <Avatar className="w-8 h-8">
-                      <AvatarImage src={u.profileImageUrl || ''} />
-                      <AvatarFallback>{(u.firstName || u.email || 'U')[0]}</AvatarFallback>
-                    </Avatar>
-                    <span className="text-sm">{u.firstName || u.email || 'Unknown'}</span>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      unblockMut.mutate(u.id, {
-                        onSuccess: () => blockedUsersQuery.refetch(),
-                      });
-                    }}
-                  >
-                    Unblock
-                  </Button>
-                </div>
-              ))}
-            </div>
-          ) : (
+          {view === 'profile' && (
             <>
               {/* Profile Image Section */}
               <div className="flex items-center gap-6">
@@ -360,42 +365,178 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
                   rows={3}
                 />
               </div>
-          {/* Theme selection */}
-          <div className="space-y-2">
-            <Label>Theme</Label>
-            <div className="flex items-center space-x-4">
-              <label className="flex items-center space-x-1">
-                <input
-                  type="radio"
-                  name="theme"
-                  value="light"
-                  checked={theme === 'light'}
-                  onChange={() => { setTheme('light'); applyTheme('light'); }}
-                  className="form-radio"
-                />
-                <span>Light</span>
-              </label>
-              <label className="flex items-center space-x-1">
-                <input
-                  type="radio"
-                  name="theme"
-                  value="dark"
-                  checked={theme === 'dark'}
-                  onChange={() => { setTheme('dark'); applyTheme('dark'); }}
-                  className="form-radio"
-                />
-                <span>Dark</span>
-              </label>
-            </div>
-          </div>
             </>
+          )}
+          {view === 'design' && (
+            <>
+              {/* Appearance Mode Selection */}
+              <div className="space-y-3">
+                <Label className="text-base font-semibold">Appearance Mode</Label>
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { name: 'light', label: 'Light', bg: 'from-slate-50 to-slate-200', border: 'border-slate-300' },
+                    { name: 'dark', label: 'Dark', bg: 'from-slate-800 to-slate-950', border: 'border-slate-700' },
+                    { name: 'greenish', label: 'Greenish', bg: 'from-emerald-100 to-teal-200', border: 'border-emerald-300' },
+                    { name: 'yellowish', label: 'Yellowish', bg: 'from-amber-100 to-yellow-200', border: 'border-amber-300' },
+                    { name: 'blueish', label: 'Blueish', bg: 'from-blue-100 to-cyan-200', border: 'border-blue-300' },
+                    { name: 'purpleish', label: 'Purpleish', bg: 'from-purple-100 to-violet-200', border: 'border-purple-300' },
+                    { name: 'pinkish', label: 'Pinkish', bg: 'from-pink-100 to-rose-200', border: 'border-pink-300' },
+                    { name: 'orangeish', label: 'Orangeish', bg: 'from-orange-100 to-amber-200', border: 'border-orange-300' },
+                  ].map(({ name, label, bg, border }) => (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => setTheme(name)}
+                      className={`p-3 rounded-xl border-2 transition-all ${
+                        theme === name 
+                          ? 'border-primary bg-primary/5 ring-2 ring-primary/20' 
+                          : 'border-border hover:border-primary/50'
+                      }`}
+                    >
+                      <div className="flex flex-col items-center gap-2">
+                        <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${bg} border ${border}`}></div>
+                        <span className="text-xs font-medium">{label}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Color Theme Selection */}
+              <div className="space-y-3">
+                <Label className="text-base font-semibold">Color Theme</Label>
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { name: 'blue', label: 'Blue', color: 'hsl(202, 83%, 55%)' },
+                    { name: 'green', label: 'Green', color: 'hsl(142, 76%, 45%)' },
+                    { name: 'red', label: 'Red', color: 'hsl(0, 72%, 51%)' },
+                    { name: 'gold', label: 'Gold', color: 'hsl(45, 93%, 47%)' },
+                    { name: 'purple', label: 'Purple', color: 'hsl(271, 81%, 56%)' },
+                    { name: 'pink', label: 'Pink', color: 'hsl(330, 81%, 60%)' },
+                    { name: 'teal', label: 'Teal', color: 'hsl(173, 80%, 40%)' },
+                    { name: 'orange', label: 'Orange', color: 'hsl(24, 95%, 53%)' },
+                    { name: 'indigo', label: 'Indigo', color: 'hsl(239, 84%, 67%)' },
+                  ].map(({ name, label, color }) => (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => setColorTheme(name)}
+                      className={`p-3 rounded-xl border-2 transition-all ${
+                        colorTheme === name 
+                          ? 'border-primary bg-primary/5 ring-2 ring-primary/20' 
+                          : 'border-border hover:border-primary/50'
+                      }`}
+                    >
+                      <div className="flex flex-col items-center gap-2">
+                        <div 
+                          className="w-10 h-10 rounded-lg shadow-sm" 
+                          style={{ backgroundColor: color }}
+                        ></div>
+                        <span className="text-xs font-medium">{label}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Font Type Selection */}
+              <div className="space-y-3">
+                <Label className="text-base font-semibold">Font Type</Label>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { name: 'inter', label: 'Inter', sampleFamily: 'Inter, sans-serif' },
+                    { name: 'poppins', label: 'Poppins', sampleFamily: 'Poppins, sans-serif' },
+                    { name: 'lora', label: 'Lora', sampleFamily: 'Lora, serif' },
+                    { name: 'jetbrains', label: 'JetBrains Mono', sampleFamily: '"JetBrains Mono", monospace' },
+                    { name: 'nunito', label: 'Nunito', sampleFamily: 'Nunito, sans-serif' },
+                    { name: 'merriweather', label: 'Merriweather', sampleFamily: 'Merriweather, serif' },
+                    { name: 'manrope', label: 'Manrope', sampleFamily: 'Manrope, sans-serif' },
+                    { name: 'playfair', label: 'Playfair Display', sampleFamily: '"Playfair Display", serif' },
+                  ].map(({ name, label, sampleFamily }) => (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => setFontType(name)}
+                      className={`p-3 rounded-xl border-2 transition-all text-left ${
+                        fontType === name
+                          ? 'border-primary bg-primary/5 ring-2 ring-primary/20'
+                          : 'border-border hover:border-primary/50'
+                      }`}
+                    >
+                      <div className="flex flex-col gap-1">
+                        <span className="text-xs text-muted-foreground">{label}</span>
+                        <span className="text-sm" style={{ fontFamily: sampleFamily }}>The quick brown fox</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Text Size Selection */}
+              <div className="space-y-3">
+                <Label className="text-base font-semibold">Text Size</Label>
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { name: 'small', label: 'Small', sampleClass: 'text-xs' },
+                    { name: 'normal', label: 'Normal', sampleClass: 'text-sm' },
+                    { name: 'large', label: 'Large', sampleClass: 'text-base' },
+                  ].map(({ name, label, sampleClass }) => (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => setTextSize(name)}
+                      className={`p-3 rounded-xl border-2 transition-all ${
+                        textSize === name
+                          ? 'border-primary bg-primary/5 ring-2 ring-primary/20'
+                          : 'border-border hover:border-primary/50'
+                      }`}
+                    >
+                      <div className="flex flex-col items-center gap-1">
+                        <span className="text-xs text-muted-foreground">{label}</span>
+                        <span className={`${sampleClass} font-medium`}>Aa</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+          {view === 'blocked' && (
+            <div>
+              {blockedUsersQuery.isLoading && <Loader2 className="animate-spin" />}
+              {blockedUsersQuery.data?.length === 0 && !blockedUsersQuery.isLoading && (
+                <p className="text-sm text-muted-foreground">You haven't blocked anyone.</p>
+              )}
+              {blockedUsersQuery.data?.map(u => (
+                <div key={u.id} className="flex items-center justify-between py-2">
+                  <div className="flex items-center gap-3">
+                    <Avatar className="w-8 h-8">
+                      <AvatarImage src={u.profileImageUrl || ''} />
+                      <AvatarFallback>{(u.firstName || u.email || 'U')[0]}</AvatarFallback>
+                    </Avatar>
+                    <span className="text-sm">{u.firstName || u.email || 'Unknown'}</span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      unblockMut.mutate(u.id, {
+                        onSuccess: () => blockedUsersQuery.refetch(),
+                      });
+                    }}
+                  >
+                    Unblock
+                  </Button>
+                </div>
+              ))}
+            </div>
           )}
         </div>
         <div className="p-6 pt-0 flex justify-end gap-3">
           <Button variant="ghost" className="rounded-xl" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          {view === 'profile' && (
+          {(view === 'profile' || view === 'design') && (
             <Button 
               onClick={handleSave} 
               disabled={updateProfile.isPending || uploadingImage}

@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&family=Poppins:wght@400;500;600;700&family=Lora:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Nunito:wght@400;500;600;700&family=Merriweather:wght@400;500;700&family=Manrope:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -52,6 +52,58 @@
     --sidebar-ring: 202 83% 55%;
   }
 
+  .font-inter {
+    --font-sans: 'Inter', sans-serif;
+    --font-display: 'Outfit', sans-serif;
+  }
+
+  .font-poppins {
+    --font-sans: 'Poppins', sans-serif;
+    --font-display: 'Poppins', sans-serif;
+  }
+
+  .font-lora {
+    --font-sans: 'Lora', serif;
+    --font-display: 'Lora', serif;
+  }
+
+  .font-jetbrains {
+    --font-sans: 'JetBrains Mono', monospace;
+    --font-display: 'JetBrains Mono', monospace;
+  }
+
+  .font-nunito {
+    --font-sans: 'Nunito', sans-serif;
+    --font-display: 'Nunito', sans-serif;
+  }
+
+  .font-merriweather {
+    --font-sans: 'Merriweather', serif;
+    --font-display: 'Merriweather', serif;
+  }
+
+  .font-manrope {
+    --font-sans: 'Manrope', sans-serif;
+    --font-display: 'Manrope', sans-serif;
+  }
+
+  .font-playfair {
+    --font-sans: 'Playfair Display', serif;
+    --font-display: 'Playfair Display', serif;
+  }
+
+  .text-size-small {
+    font-size: 14px;
+  }
+
+  .text-size-normal {
+    font-size: 16px;
+  }
+
+  .text-size-large {
+    font-size: 18px;
+  }
+
   .dark {
     /* Dark Mode - Deep blue-gray aesthetic */
     --background: 217 24% 11%;
@@ -92,6 +144,345 @@
     --sidebar-accent-foreground: 210 40% 98%;
     --sidebar-border: 215 28% 17%;
     --sidebar-ring: 202 83% 55%;
+  }
+
+  /* Green Theme */
+  .theme-green {
+    --primary: 142 76% 45%;
+    --ring: 142 76% 45%;
+    --sidebar-primary: 142 76% 45%;
+    --sidebar-ring: 142 76% 45%;
+  }
+  .theme-green.dark,
+  .theme-green.greenish,
+  .theme-green.yellowish,
+  .theme-green.blueish,
+  .theme-green.purpleish,
+  .theme-green.pinkish,
+  .theme-green.orangeish {
+    --primary: 142 76% 50%;
+    --ring: 142 76% 50%;
+    --sidebar-primary: 142 76% 45%;
+    --sidebar-ring: 142 76% 50%;
+  }
+  .theme-green ::selection {
+    background-color: hsla(142, 76%, 45%, 0.3);
+  }
+
+  /* Red Theme */
+  .theme-red {
+    --primary: 0 72% 51%;
+    --ring: 0 72% 51%;
+    --sidebar-primary: 0 72% 51%;
+    --sidebar-ring: 0 72% 51%;
+  }
+  .theme-red.dark,
+  .theme-red.greenish,
+  .theme-red.yellowish,
+  .theme-red.blueish,
+  .theme-red.purpleish,
+  .theme-red.pinkish,
+  .theme-red.orangeish {
+    --primary: 0 72% 55%;
+    --ring: 0 72% 55%;
+    --sidebar-primary: 0 72% 50%;
+    --sidebar-ring: 0 72% 55%;
+  }
+  .theme-red ::selection {
+    background-color: hsla(0, 72%, 51%, 0.3);
+  }
+
+  /* Gold Theme */
+  .theme-gold {
+    --primary: 45 93% 47%;
+    --primary-foreground: 45 20% 10%;
+    --ring: 45 93% 47%;
+    --sidebar-primary: 45 93% 47%;
+    --sidebar-primary-foreground: 45 20% 10%;
+    --sidebar-ring: 45 93% 47%;
+  }
+  .theme-gold.dark,
+  .theme-gold.greenish,
+  .theme-gold.yellowish,
+  .theme-gold.blueish,
+  .theme-gold.purpleish,
+  .theme-gold.pinkish,
+  .theme-gold.orangeish {
+    --primary: 45 93% 55%;
+    --primary-foreground: 45 20% 10%;
+    --ring: 45 93% 55%;
+    --sidebar-primary: 45 93% 50%;
+    --sidebar-primary-foreground: 45 20% 10%;
+    --sidebar-ring: 45 93% 55%;
+  }
+  .theme-gold ::selection {
+    background-color: hsla(45, 93%, 47%, 0.3);
+  }
+
+  /* Purple Theme */
+  .theme-purple {
+    --primary: 271 81% 56%;
+    --ring: 271 81% 56%;
+    --sidebar-primary: 271 81% 56%;
+    --sidebar-ring: 271 81% 56%;
+  }
+  .theme-purple.dark,
+  .theme-purple.greenish,
+  .theme-purple.yellowish,
+  .theme-purple.blueish,
+  .theme-purple.purpleish,
+  .theme-purple.pinkish,
+  .theme-purple.orangeish {
+    --primary: 271 81% 60%;
+    --ring: 271 81% 60%;
+    --sidebar-primary: 271 81% 55%;
+    --sidebar-ring: 271 81% 60%;
+  }
+  .theme-purple ::selection {
+    background-color: hsla(271, 81%, 56%, 0.3);
+  }
+
+  /* Pink Theme */
+  .theme-pink {
+    --primary: 330 81% 60%;
+    --ring: 330 81% 60%;
+    --sidebar-primary: 330 81% 60%;
+    --sidebar-ring: 330 81% 60%;
+  }
+  .theme-pink.dark,
+  .theme-pink.greenish,
+  .theme-pink.yellowish,
+  .theme-pink.blueish,
+  .theme-pink.purpleish,
+  .theme-pink.pinkish,
+  .theme-pink.orangeish {
+    --primary: 330 81% 65%;
+    --ring: 330 81% 65%;
+    --sidebar-primary: 330 81% 60%;
+    --sidebar-ring: 330 81% 65%;
+  }
+  .theme-pink ::selection {
+    background-color: hsla(330, 81%, 60%, 0.3);
+  }
+
+  /* Teal Theme */
+  .theme-teal {
+    --primary: 173 80% 40%;
+    --ring: 173 80% 40%;
+    --sidebar-primary: 173 80% 40%;
+    --sidebar-ring: 173 80% 40%;
+  }
+  .theme-teal.dark,
+  .theme-teal.greenish,
+  .theme-teal.yellowish,
+  .theme-teal.blueish,
+  .theme-teal.purpleish,
+  .theme-teal.pinkish,
+  .theme-teal.orangeish {
+    --primary: 173 80% 45%;
+    --ring: 173 80% 45%;
+    --sidebar-primary: 173 80% 40%;
+    --sidebar-ring: 173 80% 45%;
+  }
+  .theme-teal ::selection {
+    background-color: hsla(173, 80%, 40%, 0.3);
+  }
+
+  /* Orange Theme */
+  .theme-orange {
+    --primary: 24 95% 53%;
+    --ring: 24 95% 53%;
+    --sidebar-primary: 24 95% 53%;
+    --sidebar-ring: 24 95% 53%;
+  }
+  .theme-orange.dark,
+  .theme-orange.greenish,
+  .theme-orange.yellowish,
+  .theme-orange.blueish,
+  .theme-orange.purpleish,
+  .theme-orange.pinkish,
+  .theme-orange.orangeish {
+    --primary: 24 95% 58%;
+    --ring: 24 95% 58%;
+    --sidebar-primary: 24 95% 53%;
+    --sidebar-ring: 24 95% 58%;
+  }
+  .theme-orange ::selection {
+    background-color: hsla(24, 95%, 53%, 0.3);
+  }
+
+  /* Indigo Theme */
+  .theme-indigo {
+    --primary: 239 84% 67%;
+    --ring: 239 84% 67%;
+    --sidebar-primary: 239 84% 67%;
+    --sidebar-ring: 239 84% 67%;
+  }
+  .theme-indigo.dark,
+  .theme-indigo.greenish,
+  .theme-indigo.yellowish,
+  .theme-indigo.blueish,
+  .theme-indigo.purpleish,
+  .theme-indigo.pinkish,
+  .theme-indigo.orangeish {
+    --primary: 239 84% 70%;
+    --ring: 239 84% 70%;
+    --sidebar-primary: 239 84% 65%;
+    --sidebar-ring: 239 84% 70%;
+  }
+  .theme-indigo ::selection {
+    background-color: hsla(239, 84%, 67%, 0.3);
+  }
+
+  /* Colored Appearance Modes */
+  /* Greenish Appearance - Green-based color scheme */
+  .greenish {
+    --background: 142 40% 25%;
+    --foreground: 142 30% 95%;
+    --card: 142 35% 30%;
+    --card-foreground: 142 30% 95%;
+    --popover: 142 35% 30%;
+    --popover-foreground: 142 30% 95%;
+    --secondary: 142 30% 35%;
+    --secondary-foreground: 142 30% 95%;
+    --muted: 142 25% 35%;
+    --muted-foreground: 142 20% 70%;
+    --accent: 142 30% 35%;
+    --accent-foreground: 142 30% 95%;
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 142 30% 95%;
+    --border: 142 25% 35%;
+    --input: 142 25% 35%;
+    --sidebar-background: 142 35% 30%;
+    --sidebar-foreground: 142 30% 95%;
+    --sidebar-accent: 142 25% 35%;
+    --sidebar-accent-foreground: 142 30% 95%;
+    --sidebar-border: 142 25% 35%;
+  }
+
+  /* Yellowish Appearance - Yellow/Gold-based color scheme */
+  .yellowish {
+    --background: 45 45% 30%;
+    --foreground: 45 25% 95%;
+    --card: 45 40% 35%;
+    --card-foreground: 45 25% 95%;
+    --popover: 45 40% 35%;
+    --popover-foreground: 45 25% 95%;
+    --secondary: 45 35% 40%;
+    --secondary-foreground: 45 25% 95%;
+    --muted: 45 30% 40%;
+    --muted-foreground: 45 20% 70%;
+    --accent: 45 35% 40%;
+    --accent-foreground: 45 25% 95%;
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 45 25% 95%;
+    --border: 45 30% 40%;
+    --input: 45 30% 40%;
+    --sidebar-background: 45 40% 35%;
+    --sidebar-foreground: 45 25% 95%;
+    --sidebar-accent: 45 30% 40%;
+    --sidebar-accent-foreground: 45 25% 95%;
+    --sidebar-border: 45 30% 40%;
+  }
+
+  /* Blueish Appearance - Blue-based color scheme */
+  .blueish {
+    --background: 202 45% 25%;
+    --foreground: 202 30% 95%;
+    --card: 202 40% 30%;
+    --card-foreground: 202 30% 95%;
+    --popover: 202 40% 30%;
+    --popover-foreground: 202 30% 95%;
+    --secondary: 202 35% 35%;
+    --secondary-foreground: 202 30% 95%;
+    --muted: 202 30% 35%;
+    --muted-foreground: 202 20% 70%;
+    --accent: 202 35% 35%;
+    --accent-foreground: 202 30% 95%;
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 202 30% 95%;
+    --border: 202 30% 35%;
+    --input: 202 30% 35%;
+    --sidebar-background: 202 40% 30%;
+    --sidebar-foreground: 202 30% 95%;
+    --sidebar-accent: 202 30% 35%;
+    --sidebar-accent-foreground: 202 30% 95%;
+    --sidebar-border: 202 30% 35%;
+  }
+
+  /* Purpleish Appearance - Purple-based color scheme */
+  .purpleish {
+    --background: 271 45% 25%;
+    --foreground: 271 30% 95%;
+    --card: 271 40% 30%;
+    --card-foreground: 271 30% 95%;
+    --popover: 271 40% 30%;
+    --popover-foreground: 271 30% 95%;
+    --secondary: 271 35% 35%;
+    --secondary-foreground: 271 30% 95%;
+    --muted: 271 30% 35%;
+    --muted-foreground: 271 20% 70%;
+    --accent: 271 35% 35%;
+    --accent-foreground: 271 30% 95%;
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 271 30% 95%;
+    --border: 271 30% 35%;
+    --input: 271 30% 35%;
+    --sidebar-background: 271 40% 30%;
+    --sidebar-foreground: 271 30% 95%;
+    --sidebar-accent: 271 30% 35%;
+    --sidebar-accent-foreground: 271 30% 95%;
+    --sidebar-border: 271 30% 35%;
+  }
+
+  /* Pinkish Appearance - Pink-based color scheme */
+  .pinkish {
+    --background: 330 45% 28%;
+    --foreground: 330 30% 95%;
+    --card: 330 40% 33%;
+    --card-foreground: 330 30% 95%;
+    --popover: 330 40% 33%;
+    --popover-foreground: 330 30% 95%;
+    --secondary: 330 35% 38%;
+    --secondary-foreground: 330 30% 95%;
+    --muted: 330 30% 38%;
+    --muted-foreground: 330 20% 72%;
+    --accent: 330 35% 38%;
+    --accent-foreground: 330 30% 95%;
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 330 30% 95%;
+    --border: 330 30% 38%;
+    --input: 330 30% 38%;
+    --sidebar-background: 330 40% 33%;
+    --sidebar-foreground: 330 30% 95%;
+    --sidebar-accent: 330 30% 38%;
+    --sidebar-accent-foreground: 330 30% 95%;
+    --sidebar-border: 330 30% 38%;
+  }
+
+  /* Orangeish Appearance - Orange-based color scheme */
+  .orangeish {
+    --background: 24 50% 28%;
+    --foreground: 24 25% 95%;
+    --card: 24 45% 33%;
+    --card-foreground: 24 25% 95%;
+    --popover: 24 45% 33%;
+    --popover-foreground: 24 25% 95%;
+    --secondary: 24 40% 38%;
+    --secondary-foreground: 24 25% 95%;
+    --muted: 24 35% 38%;
+    --muted-foreground: 24 20% 72%;
+    --accent: 24 40% 38%;
+    --accent-foreground: 24 25% 95%;
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 24 25% 95%;
+    --border: 24 35% 38%;
+    --input: 24 35% 38%;
+    --sidebar-background: 24 45% 33%;
+    --sidebar-foreground: 24 25% 95%;
+    --sidebar-accent: 24 35% 38%;
+    --sidebar-accent-foreground: 24 25% 95%;
+    --sidebar-border: 24 35% 38%;
   }
 }
 

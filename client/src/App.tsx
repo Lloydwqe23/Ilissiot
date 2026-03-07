@@ -48,9 +48,35 @@ function ThemeInitializer() {
   const { user } = useAuth();
   const { setTheme } = useTheme();
   useEffect(() => {
+    const appearanceClasses = ['light', 'dark', 'greenish', 'yellowish', 'blueish', 'purpleish', 'pinkish', 'orangeish'];
+    const colorThemeClasses = ['theme-blue', 'theme-green', 'theme-red', 'theme-gold', 'theme-purple', 'theme-pink', 'theme-teal', 'theme-orange', 'theme-indigo'];
+    const fontClasses = ['font-inter', 'font-poppins', 'font-lora', 'font-jetbrains', 'font-nunito', 'font-merriweather', 'font-manrope', 'font-playfair'];
+    const textSizeClasses = ['text-size-small', 'text-size-normal', 'text-size-large'];
+
+    // Apply appearance theme to root element
     if (user?.theme) {
-      setTheme(user.theme);
+      document.documentElement.classList.remove(...appearanceClasses);
+      document.documentElement.classList.add(user.theme);
+      // Also set next-themes for dark class if theme is dark
+      if (user.theme === 'dark') {
+        setTheme('dark');
+      } else {
+        setTheme('light');
+      }
     }
+    // Apply color theme class if user has one
+    if (user?.colorTheme) {
+      document.documentElement.classList.remove(...colorThemeClasses);
+      document.documentElement.classList.add(`theme-${user.colorTheme}`);
+    }
+
+    // Apply global font style
+    document.documentElement.classList.remove(...fontClasses);
+    document.documentElement.classList.add(`font-${user?.fontType || 'inter'}`);
+
+    // Apply global text size scale
+    document.documentElement.classList.remove(...textSizeClasses);
+    document.documentElement.classList.add(`text-size-${user?.textSize || 'normal'}`);
   }, [user, setTheme]);
   return null;
 }
