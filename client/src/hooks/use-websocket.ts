@@ -5,16 +5,27 @@ import { setUserStatus, setOnlineUsers } from './use-user-status';
 import { setTypingStart, setTypingStop, setWsSendForTyping } from './use-typing';
 import { useCall } from './use-call';
 
-export function useChatWebSocket(userId: string | undefined) {
+export function useChatWebSocket(
+  userId: string | undefined, 
+  onMessageReceived?: (senderName: string, message: string, senderImage?: string) => void,
+  activeChatId?: number | null
+) {
   const queryClient = useQueryClient();
   const call = useCall();
   const wsRef = useRef<WebSocket | null>(null);
-  const isVisibleRef = useRef(!document.hidden);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const intentionalRef = useRef(false);
   // Keep fresh references so the WS callback always sees the latest handlers
   const callRef = useRef(call);
   callRef.current = call;
+  const onMessageReceivedRef = useRef(onMessageReceived);
+  onMessageReceivedRef.current = onMessageReceived;
+  const activeChatIdRef = useRef(activeChatId);
+  activeChatIdRef.current = activeChatId;
+  
+
+
+
 
   useEffect(() => {
     if (!userId) return;
@@ -63,6 +74,16 @@ export function useChatWebSocket(userId: string | undefined) {
           // ── New message ───────────────────────────────────────────
           if (data.type === WS_EVENTS.MESSAGE_NEW) {
             const message = data.payload as MessageResponse;
+
+            // Trigger notification for incoming messages from other users in different chats
+            if (onMessageReceivedRef.current && message.senderId !== userId && message.chatId !== activeChatIdRef.current) {
+              const senderName = (message as any).sender 
+                ? [(message as any).sender.firstName, (message as any).sender.lastName].filter(Boolean).join(' ') || (message as any).sender.email || 'Unknown'
+                : 'Unknown';
+              const messagePreview = message.content?.substring(0, 100) || '📎 Attachment';
+              const senderImage = (message as any).sender?.profileImageUrl;
+              onMessageReceivedRef.current(senderName, messagePreview, senderImage);
+            }
 
             // 1. Append to the open chat's message list
             const msgKey = [api.messages.list.path, message.chatId.toString()];

@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState, ReactNode } from "react";
+import { useEffect, useRef, useState, useMemo, ReactNode } from "react";
 import { format, isToday, isYesterday } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
 import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, CheckCircle2, Smile, Phone, Video, Mic, StopCircle, Ban, Search, Pencil, Check, Play, Pause, Download, Reply, Share2, FileText, FileSpreadsheet, FileType, File as FileIcon, Presentation, FileArchive, FileCode, Users, UserPlus, UserMinus, Crown, Maximize, ScreenShare, Pin, BarChart3, Link2, Paintbrush, Shield, CalendarDays } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { useChat, useChats, useBlockStatus, useBlockUser, useUnblockUser, useLeaveGroup, useAddGroupMembers, useRemoveGroupMember, useUpdateGroupChat, usePinMessage, useUnpinMessage } from "@/hooks/use-chats";
+import { useChat, useChats, useBlockStatus, useBlockUser, useUnblockUser, useLeaveGroup, useAddGroupMembers, useRemoveGroupMember, useUpdateGroupChat, usePinMessage, useUnpinMessage, useCreateDirectChat } from "@/hooks/use-chats";
 import { useMessages, useSendMessage, useMarkMessagesRead, useDeleteMessages, useEditMessage, useAddReaction, useRemoveReaction } from "@/hooks/use-messages";
 import { useUserStatus, formatLastSeen } from "@/hooks/use-user-status";
 import { useTypingUsers, useSendTyping } from "@/hooks/use-typing";
@@ -472,6 +472,7 @@ function GroupInfoDialog({
   updateGroupChat,
   leaveGroup,
   onLeave,
+  onJumpToMessage,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -483,6 +484,7 @@ function GroupInfoDialog({
   updateGroupChat: any;
   leaveGroup: any;
   onLeave: () => void;
+  onJumpToMessage?: (messageId: number) => void;
 }) {
   const [addMode, setAddMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -490,9 +492,82 @@ function GroupInfoDialog({
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState(chat.name || '');
   const [settingsMember, setSettingsMember] = useState<any>(null);
+  const [activeTab, setActiveTab] = useState<'members' | 'voice-video' | 'media' | 'documents'>('members');
+  const [playingId, setPlayingId] = useState<number | null>(null);
+  const [currentTime, setCurrentTime] = useState<Record<number, number>>({});
+  const [duration, setDuration] = useState<Record<number, number>>({});
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const mediaRefs = useRef<Record<number, HTMLAudioElement | HTMLVideoElement>>({});
   const { data: searchResults } = useSearchUsers(searchQuery);
+  
+  // Fetch all messages from the group
+  const { data: messages = [] } = useMessages(chat.id);
+  
+  // Categorize ALL attachments from ALL messages
+  const mediaData = useMemo(() => {
+    if (!messages) return { audioVideo: [], media: [], documents: [] };
+    
+    const audioVideo: Array<{ id: number; url: string; name: string; type: string; createdAt: any; senderName: string }> = [];
+    const media: Array<{ id: number; url: string; name: string; type: string; createdAt: any; senderName: string }> = [];
+    const documents: Array<{ id: number; url: string; name: string; type: string; createdAt: any; senderName: string; size?: number }> = [];
+    
+    messages.forEach((msg: any) => {
+      if (!msg.attachments) return;
+      
+      const senderName = msg.sender 
+        ? [msg.sender.firstName, msg.sender.lastName].filter(Boolean).join(' ') || msg.sender.email || 'Unknown'
+        : 'Unknown';
+      
+      msg.attachments.forEach((att: any) => {
+        const mimeType = att.type || '';
+        const fileExt = att.name?.split('.').pop()?.toLowerCase() || '';
+        const isGif = att.name === 'GIF' || fileExt === 'gif';
+        
+        // Check if it's a recorded audio/video/screen message
+        const isRecordedAudio = att.name?.startsWith('audio-') && fileExt === 'webm';
+        const isRecordedVideo = att.name?.startsWith('video-') && fileExt === 'webm';
+        const isScreenShare = att.name?.startsWith('screen-') && fileExt === 'webm';
+        
+        if (isRecordedAudio || isRecordedVideo || isScreenShare) {
+          audioVideo.push({
+            id: msg.id,
+            url: att.url,
+            name: att.name,
+            type: att.type,
+            createdAt: msg.createdAt,
+            senderName
+          });
+        } else if (!isGif && (mimeType.startsWith('image/') || mimeType.startsWith('video/'))) {
+          media.push({
+            id: msg.id,
+            url: att.url,
+            name: att.name,
+            type: att.type,
+            createdAt: msg.createdAt,
+            senderName
+          });
+        } else if (!mimeType.startsWith('image/') && !mimeType.startsWith('video/') && !mimeType.startsWith('audio/')) {
+          // It's a document/file
+          documents.push({
+            id: msg.id,
+            url: att.url,
+            name: att.name,
+            type: att.type,
+            createdAt: msg.createdAt,
+            senderName
+          });
+        }
+      });
+    });
+    
+    // Sort by date (newest first)
+    audioVideo.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    media.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    documents.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    
+    return { audioVideo, media, documents };
+  }, [messages]);
 
   const myMembership = chat.members?.find((m: any) => m.userId === currentUserId);
   const isAdmin = myMembership?.role === 'admin';
@@ -524,10 +599,63 @@ function GroupInfoDialog({
     }
   };
 
+  const togglePlay = (id: number) => {
+    const element = mediaRefs.current[id];
+    if (!element) return;
+
+    if (playingId === id) {
+      element.pause();
+      setPlayingId(null);
+      return;
+    }
+
+    if (playingId !== null && mediaRefs.current[playingId]) {
+      mediaRefs.current[playingId].pause();
+    }
+
+    element.play();
+    setPlayingId(id);
+  };
+
+  const handleTimeUpdate = (id: number, element: HTMLAudioElement | HTMLVideoElement) => {
+    setCurrentTime((prev) => ({ ...prev, [id]: element.currentTime }));
+  };
+
+  const handleLoadedMetadata = (id: number, element: HTMLAudioElement | HTMLVideoElement) => {
+    setDuration((prev) => ({ ...prev, [id]: element.duration }));
+  };
+
+  const handleEnded = (id: number) => {
+    setPlayingId(null);
+    setCurrentTime((prev) => ({ ...prev, [id]: 0 }));
+  };
+
+  const openFullscreen = (id: number) => {
+    const element = mediaRefs.current[id];
+    if (!(element instanceof HTMLVideoElement)) return;
+
+    if (element.requestFullscreen) {
+      element.requestFullscreen();
+      return;
+    }
+
+    const anyElement = element as any;
+    if (anyElement.webkitRequestFullscreen) {
+      anyElement.webkitRequestFullscreen();
+    }
+  };
+
+  const formatTime = (seconds: number) => {
+    if (!seconds || Number.isNaN(seconds)) return "0:00";
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
   return (
     <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) { setAddMode(false); setSearchQuery(''); } }}>
-      <DialogContent className="sm:max-w-md max-h-[80vh] flex flex-col">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] flex flex-col rounded-2xl p-0 overflow-hidden border-border/50 shadow-2xl">
+        <DialogHeader className="p-6 bg-gradient-to-b from-primary/10 to-transparent border-b border-border/50">
           <DialogTitle className="flex items-center gap-3">
             <input
               type="file"
@@ -595,8 +723,54 @@ function GroupInfoDialog({
             </div>
           </DialogTitle>
           <DialogDescription className="sr-only">Group chat information and member management</DialogDescription>
+          
+          {/* Tabs */}
+          <div className="flex gap-1 mt-4 border-b border-border overflow-x-auto">
+            <button
+              onClick={() => setActiveTab('members')}
+              className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
+                activeTab === 'members'
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Members ({chat.members?.length || 0})
+            </button>
+            <button
+              onClick={() => setActiveTab('voice-video')}
+              className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
+                activeTab === 'voice-video'
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Voice & Video ({mediaData.audioVideo.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('media')}
+              className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
+                activeTab === 'media'
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Media ({mediaData.media.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('documents')}
+              className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
+                activeTab === 'documents'
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Documents ({mediaData.documents.length})
+            </button>
+          </div>
         </DialogHeader>
 
+        {activeTab === 'members' && (
+          <>
         {/* Add Members Mode */}
         {addMode ? (
           <div className="flex flex-col gap-3 flex-1 overflow-hidden">
@@ -750,6 +924,219 @@ function GroupInfoDialog({
             </Button>
           </div>
         )}
+        </>
+        )}
+        
+        {/* Voice & Video Tab */}
+        {activeTab === 'voice-video' && (
+          <div className="flex-1 overflow-y-auto">
+            <div className="p-6">
+              {mediaData.audioVideo.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Mic className="w-12 h-12 mx-auto mb-2 opacity-20" />
+                  <p>No voice or video messages yet</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {mediaData.audioVideo.map((item) => {
+                    const isAudio = item.name?.startsWith("audio-");
+                    const isScreen = item.name?.startsWith("screen-");
+                    const Icon = isAudio ? Mic : isScreen ? ScreenShare : Video;
+                    const label = isAudio ? "Audio Message" : isScreen ? "Screen Recording" : "Video Message";
+                    const isPlaying = playingId === item.id;
+                    const time = currentTime[item.id] || 0;
+                    const dur = duration[item.id] || 0;
+
+                    return (
+                      <div 
+                        key={`${item.id}-${item.url}`} 
+                        className="rounded-lg border border-border overflow-hidden cursor-pointer hover:bg-accent/30 transition-colors" 
+                        onClick={() => onJumpToMessage?.(item.id)}
+                      >
+                        <div className="flex items-center gap-3 p-3 bg-accent/20">
+                          <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                            <Icon className="w-5 h-5 text-primary" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium">{label}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {item.senderName} • {new Date(item.createdAt).toLocaleDateString()}
+                            </p>
+                          </div>
+                          <div className="flex gap-1">
+                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={(e) => { e.stopPropagation(); togglePlay(item.id); }}>
+                              {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                            </Button>
+                            {!isAudio && (
+                              <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={(e) => { e.stopPropagation(); openFullscreen(item.id); }}>
+                                <Maximize className="w-4 h-4" />
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 w-8 p-0"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const a = document.createElement('a');
+                                a.href = item.url;
+                                a.download = item.name;
+                                a.click();
+                              }}
+                            >
+                              <Download className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="px-3 pb-3">
+                          {isAudio ? (
+                            <audio
+                              ref={(el) => {
+                                if (el) mediaRefs.current[item.id] = el;
+                              }}
+                              src={item.url}
+                              onTimeUpdate={(e) => handleTimeUpdate(item.id, e.currentTarget)}
+                              onLoadedMetadata={(e) => handleLoadedMetadata(item.id, e.currentTarget)}
+                              onEnded={() => handleEnded(item.id)}
+                              className="w-full"
+                            />
+                          ) : (
+                            <video
+                              ref={(el) => {
+                                if (el) mediaRefs.current[item.id] = el;
+                              }}
+                              src={item.url}
+                              onTimeUpdate={(e) => handleTimeUpdate(item.id, e.currentTarget)}
+                              onLoadedMetadata={(e) => handleLoadedMetadata(item.id, e.currentTarget)}
+                              onEnded={() => handleEnded(item.id)}
+                              className="w-full rounded-lg"
+                              controls={false}
+                            />
+                          )}
+
+                          <div className="mt-2 flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground min-w-[35px]">{formatTime(time)}</span>
+                            <div className="flex-1 h-1 bg-border rounded-full overflow-hidden">
+                              <div className="h-full bg-primary transition-all" style={{ width: `${dur > 0 ? (time / dur) * 100 : 0}%` }} />
+                            </div>
+                            <span className="text-xs text-muted-foreground min-w-[35px]">{formatTime(dur)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        
+        {/* Media Tab */}
+        {activeTab === 'media' && (
+          <div className="flex-1 overflow-y-auto">
+            <div className="p-6">
+              {mediaData.media.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <FileIcon className="w-12 h-12 mx-auto mb-2 opacity-20" />
+                  <p>No media shared yet</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-2">
+                  {mediaData.media.map((item) => {
+                    const isVideo = item.type?.startsWith('video/');
+                    
+                    return (
+                      <div
+                        key={`${item.id}-${item.url}`}
+                        className="aspect-square relative rounded-lg overflow-hidden cursor-pointer hover:opacity-80 transition-opacity border border-border"
+                        onClick={() => onJumpToMessage?.(item.id)}
+                      >
+                        {isVideo ? (
+                          <>
+                            <video
+                              src={item.url}
+                              className="w-full h-full object-cover"
+                            />
+                            <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                              <Play className="w-8 h-8 text-white" />
+                            </div>
+                          </>
+                        ) : (
+                          <img
+                            src={item.url}
+                            alt="Media"
+                            className="w-full h-full object-cover"
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        
+        {/* Documents Tab */}
+        {activeTab === 'documents' && (
+          <div className="flex-1 overflow-y-auto">
+            <div className="p-6">
+              {mediaData.documents.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <FileText className="w-12 h-12 mx-auto mb-2 opacity-20" />
+                  <p>No documents shared yet</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {mediaData.documents.map((item) => {
+                    return (
+                      <div 
+                        key={`${item.id}-${item.url}`} 
+                        className="flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-accent/50 transition-colors cursor-pointer" 
+                        onClick={() => onJumpToMessage?.(item.id)}
+                      >
+                        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                          <FileIcon className="w-5 h-5 text-primary" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{item.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {item.senderName} • {new Date(item.createdAt).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <div className="flex gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 w-8 p-0"
+                            onClick={(e) => { e.stopPropagation(); window.open(item.url, '_blank'); }}
+                          >
+                            <FileText className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 w-8 p-0"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const a = document.createElement('a');
+                              a.href = item.url;
+                              a.download = item.name;
+                              a.click();
+                            }}
+                          >
+                            <Download className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </DialogContent>
 
       {/* Member Settings Dialog */}
@@ -832,6 +1219,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   // profile modal state
   const [profileUser, setProfileUser] = useState<any>(null);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [imagePreview, setImagePreview] = useState<{ url: string; name: string } | null>(null);
 
   // group info dialog state
   const [groupInfoOpen, setGroupInfoOpen] = useState(false);
@@ -1129,15 +1517,17 @@ export function ChatWindow({ chatId }: { chatId: number }) {
 
           if (isImage) {
             return (
-              <a
+              <button
                 key={idx}
-                href={file.url}
-                target="_blank"
-                rel="noopener noreferrer"
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setImagePreview({ url: file.url, name: file.name || "Image" });
+                }}
                 className="block rounded-lg overflow-hidden hover:opacity-90 transition-opacity"
               >
                 <img src={file.url} alt={file.name} className="max-w-xs max-h-96 rounded-lg" />
-              </a>
+              </button>
             );
           } else if (isVideo) {
             return <VideoMessage key={idx} url={file.url} name={file.name} isMine={isMine} />;
@@ -1175,8 +1565,35 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const [selectedMessages, setSelectedMessages] = useState<Set<number>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+
+  const updateJumpToBottomVisibility = () => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    setShowJumpToBottom(distanceFromBottom > 140);
+  };
+
+  const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
+    setShowJumpToBottom(false);
+  };
+
+  const jumpToMessage = (messageId: number) => {
+    setProfileModalOpen(false);
+    setGroupInfoOpen(false);
+    setTimeout(() => {
+      const element = document.querySelector(`[data-message-id="${messageId}"]`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        element.classList.add('ring-2', 'ring-primary/50', 'rounded-lg');
+        setTimeout(() => element.classList.remove('ring-2', 'ring-primary/50', 'rounded-lg'), 2000);
+      }
+    }, 300);
+  };
 
   const openProfileByUsername = (username: string) => {
     if (!chat?.members?.length) return;
@@ -1191,13 +1608,15 @@ export function ChatWindow({ chatId }: { chatId: number }) {
 
   // Auto scroll to bottom
   useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
+    scrollToBottom("smooth");
     if (chatId) {
       markRead.mutate(chatId);
     }
   }, [messages?.length, chatId]);
+
+  useEffect(() => {
+    updateJumpToBottomVisibility();
+  }, [messages?.length]);
 
   // cleanup recorder if component unmounts
   useEffect(() => {
@@ -1875,6 +2294,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const addGroupMembers = useAddGroupMembers();
   const removeGroupMember = useRemoveGroupMember();
   const updateGroupChat = useUpdateGroupChat();
+  const createDirectChat = useCreateDirectChat();
 
   const handleLeaveGroup = () => {
     if (!confirm('Leave this group? You will no longer receive messages.')) return;
@@ -2316,7 +2736,11 @@ export function ChatWindow({ chatId }: { chatId: number }) {
       )}
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 scrollbar-hide flex flex-col">
+      <div
+        ref={messagesContainerRef}
+        onScroll={updateJumpToBottomVisibility}
+        className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 scrollbar-hide flex flex-col min-h-0"
+      >
         {messages?.length === 0 ? (
           <div className="m-auto text-center p-6 bg-card rounded-2xl shadow-sm border border-border/50 max-w-sm">
             <h3 className="font-semibold mb-1">Say Hello! 👋</h3>
@@ -2695,6 +3119,18 @@ export function ChatWindow({ chatId }: { chatId: number }) {
           </div>
         )}
       </div>
+
+      {showJumpToBottom && (
+        <button
+          type="button"
+          onClick={() => scrollToBottom("smooth")}
+          className="fixed right-4 bottom-24 z-30 h-10 w-10 rounded-full bg-primary text-primary-foreground shadow-lg hover:scale-105 hover:opacity-100 transition-all flex items-center justify-center opacity-60"
+          title="Jump to latest messages"
+          aria-label="Jump to latest messages"
+        >
+          <ArrowLeft className="w-4 h-4 -rotate-90" />
+        </button>
+      )}
 
       {/* Input Area */}
       <div className="p-4 bg-background/80 backdrop-blur-md border-t border-border/50 shrink-0">
@@ -3200,12 +3636,48 @@ export function ChatWindow({ chatId }: { chatId: number }) {
         </DialogContent>
       </Dialog>
 
+      {/* In-chat image preview */}
+      <Dialog open={!!imagePreview} onOpenChange={(open) => { if (!open) setImagePreview(null); }}>
+        <DialogContent className="sm:max-w-[900px] p-0 overflow-hidden" aria-describedby={undefined}>
+          <DialogHeader className="p-4 border-b border-border/50">
+            <DialogTitle className="truncate">{imagePreview?.name || 'Image'}</DialogTitle>
+          </DialogHeader>
+          <div className="flex items-center justify-center bg-black/90 p-4">
+            {imagePreview && (
+              <img
+                src={imagePreview.url}
+                alt={imagePreview.name}
+                className="max-w-full max-h-[75vh] object-contain rounded"
+              />
+            )}
+          </div>
+          <div className="p-4 flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (!imagePreview) return;
+                const a = document.createElement('a');
+                a.href = imagePreview.url;
+                a.download = imagePreview.name;
+                a.click();
+              }}
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Download
+            </Button>
+            <Button variant="ghost" onClick={() => setImagePreview(null)}>Close</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* User Profile Modal */}
       {profileUser && (
         <UserProfileModal
           user={profileUser}
           open={profileModalOpen}
           onOpenChange={setProfileModalOpen}
+          currentUserId={user?.id}
+          onJumpToMessage={jumpToMessage}
           onCall={(type) => {
             if (profileUser.id && chat) {
               call.startCall(
@@ -3220,6 +3692,16 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                 user?.profileImageUrl
               );
               setProfileModalOpen(false);
+            }
+          }}
+          onMessage={() => {
+            if (profileUser.id) {
+              createDirectChat.mutate(profileUser.id, {
+                onSuccess: (newChat) => {
+                  setProfileModalOpen(false);
+                  navigate(`/chat/${newChat.id}`);
+                },
+              });
             }
           }}
         />
@@ -3238,6 +3720,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
           updateGroupChat={updateGroupChat}
           leaveGroup={leaveGroup}
           onLeave={() => navigate('/')}
+          onJumpToMessage={jumpToMessage}
         />
       )}
 

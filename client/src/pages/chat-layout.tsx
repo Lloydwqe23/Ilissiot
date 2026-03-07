@@ -3,8 +3,10 @@ import { useRoute } from "wouter";
 import { SidebarProvider, useSidebar } from "@/components/ui/sidebar";
 import { ChatSidebar } from "@/components/chat-sidebar";
 import { ChatWindow } from "@/components/chat-window";
+import { MessageNotification } from "@/components/message-notification";
 import { useAuth } from "@/hooks/use-auth";
 import { useChatWebSocket } from "@/hooks/use-websocket";
+import { useNotificationManager } from "@/hooks/use-notifications";
 import { motion } from "framer-motion";
 
 /**
@@ -26,9 +28,13 @@ function MobileSidebarController({ hasChatOpen }: { hasChatOpen: boolean }) {
 export function ChatLayout() {
   const [match, params] = useRoute("/chat/:id");
   const { user } = useAuth();
+  const { notifications, addNotification, dismissNotification } = useNotificationManager();
   
-  // Initialize WebSocket connection
-  useChatWebSocket(user?.id);
+  // Get active chat ID for notification filtering
+  const activeChatId = match && params.id ? parseInt(params.id) : null;
+  
+  // Initialize WebSocket connection with notification callback
+  useChatWebSocket(user?.id, addNotification, activeChatId);
 
   const hasChatOpen = !!(match && params.id);
 
@@ -71,6 +77,12 @@ export function ChatLayout() {
           )}
         </main>
       </div>
+
+      {/* Message Notifications */}
+      <MessageNotification 
+        notifications={notifications}
+        onDismiss={dismissNotification}
+      />
     </SidebarProvider>
   );
 }
