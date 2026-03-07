@@ -2484,7 +2484,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
 
   return (
     <div
-      className={`flex-1 flex flex-col h-screen relative overflow-hidden ${isCustomBg ? '' : 'bg-[#f8f9fa] dark:bg-[#0e1621]'}`}
+      className={`flex-1 flex flex-col h-dvh relative overflow-hidden ${isCustomBg ? '' : 'bg-[#f8f9fa] dark:bg-[#0e1621]'}`}
       style={effectiveBgStyle}
     >
 
@@ -3332,7 +3332,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                 <Smile className="w-5 h-5" />
               </button>
               {showStickerPicker && (
-                <div className="absolute bottom-full mb-2 right-0 w-[340px] bg-card border border-border/50 rounded-xl shadow-xl z-50 flex flex-col overflow-hidden">
+                <div className="absolute bottom-full mb-2 right-0 w-[340px] max-w-[calc(100vw-2rem)] max-h-[min(360px,60dvh)] bg-card border border-border/50 rounded-xl shadow-xl z-50 flex flex-col overflow-hidden">
                   {/* Tab switcher: Emoji | GIF */}
                   <div className="flex border-b border-border/50">
                     <button
@@ -3358,7 +3358,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                         <span className="text-xs font-semibold text-muted-foreground">{EMOJI_CATEGORIES[selectedCategory].title}</span>
                       </div>
                       {/* emoji grid */}
-                      <div ref={emojiGridRef} className="px-2 pb-1 overflow-y-auto" style={{ height: '220px' }}>
+                      <div ref={emojiGridRef} className="px-2 pb-1 overflow-y-auto flex-1 min-h-0" style={{ maxHeight: '220px' }}>
                         <div className="grid grid-cols-8 gap-0.5">
                           {EMOJI_CATEGORIES[selectedCategory].items.map((emoji, i) => (
                             <button
@@ -3411,7 +3411,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                         />
                       </div>
                       {/* GIF grid */}
-                      <div ref={gifScrollRef} onScroll={handleGifScroll} className="px-2 pb-2 overflow-y-auto" style={{ height: '240px' }}>
+                      <div ref={gifScrollRef} onScroll={handleGifScroll} className="px-2 pb-2 overflow-y-auto flex-1 min-h-0" style={{ maxHeight: '240px' }}>
                         {gifResults.length === 0 && gifLoading ? (
                           <div className="flex items-center justify-center h-full">
                             <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />

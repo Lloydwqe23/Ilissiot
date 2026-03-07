@@ -47,7 +47,7 @@ export function ChatLayout() {
   return (
     <SidebarProvider style={sidebarStyle}>
       <MobileSidebarController hasChatOpen={hasChatOpen} />
-      <div className="flex h-screen w-full overflow-hidden bg-background">
+      <div className="flex h-dvh w-full overflow-hidden bg-background">
         <ChatSidebar />
         
         {/* Main Content Area */}
