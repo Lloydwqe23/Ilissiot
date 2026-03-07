@@ -1,10 +1,15 @@
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X } from "lucide-react";
+import { X, Users } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useLocation } from "wouter";
 
 export interface Notification {
   id: string;
+  chatId: number;
+  chatName?: string;
+  chatImage?: string;
+  isGroup?: boolean;
   senderName: string;
   senderImage?: string;
   message: string;
@@ -19,6 +24,7 @@ export function MessageNotification({
   onDismiss: (id: string) => void;
 }) {
   const [visibleNotifications, setVisibleNotifications] = useState<string[]>([]);
+  const [, navigate] = useLocation();
 
   // Auto-dismiss notifications after 5 seconds
   useEffect(() => {
@@ -51,23 +57,51 @@ export function MessageNotification({
               animate={{ opacity: 1, y: 0, x: 0 }}
               exit={{ opacity: 0, y: 20, x: 20 }}
               transition={{ type: "spring", stiffness: 300, damping: 30 }}
-              className="bg-card border border-border/50 rounded-lg shadow-lg p-4 pointer-events-auto"
+              className="bg-card border border-border/50 rounded-lg shadow-lg p-4 pointer-events-auto cursor-pointer hover:bg-accent/50 transition-colors"
+              onClick={() => {
+                navigate(`/chat/${notif.chatId}`);
+                setVisibleNotifications(prev => prev.filter(id => id !== notif.id));
+                onDismiss(notif.id);
+              }}
             >
               <div className="flex gap-3">
                 <Avatar className="w-10 h-10 shrink-0">
-                  <AvatarImage src={notif.senderImage || ""} />
-                  <AvatarFallback className="bg-primary/10 text-primary text-sm font-medium">
-                    {notif.senderName[0]?.toUpperCase() || "?"}
-                  </AvatarFallback>
+                  {notif.isGroup ? (
+                    <>
+                      <AvatarImage src={notif.chatImage || ""} />
+                      <AvatarFallback className="bg-primary/10 text-primary text-sm font-medium">
+                        <Users className="w-5 h-5" />
+                      </AvatarFallback>
+                    </>
+                  ) : (
+                    <>
+                      <AvatarImage src={notif.senderImage || ""} />
+                      <AvatarFallback className="bg-primary/10 text-primary text-sm font-medium">
+                        {notif.senderName[0]?.toUpperCase() || "?"}
+                      </AvatarFallback>
+                    </>
+                  )}
                 </Avatar>
                 <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-sm text-foreground">{notif.senderName}</p>
-                  <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">
-                    {notif.message}
-                  </p>
+                  {notif.isGroup && notif.chatName ? (
+                    <>
+                      <p className="font-semibold text-sm text-foreground">{notif.chatName}</p>
+                      <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">
+                        <span className="font-medium text-foreground/80">{notif.senderName}:</span> {notif.message}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-semibold text-sm text-foreground">{notif.senderName}</p>
+                      <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">
+                        {notif.message}
+                      </p>
+                    </>
+                  )}
                 </div>
                 <button
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation();
                     setVisibleNotifications(prev => prev.filter(id => id !== notif.id));
                     onDismiss(notif.id);
                   }}

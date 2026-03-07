@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { Link, useRoute, useLocation } from "wouter";
 import { format, isToday, isYesterday } from "date-fns";
-import { Edit, LogOut, Settings, MoreVertical, ArrowLeft, Image, Mic, Video, Phone, FileText, Sticker, Pin, PinOff, LogOut as LeaveIcon, Users } from "lucide-react";
+import { Edit, LogOut, Settings, MoreVertical, ArrowLeft, Image, Mic, Video, Phone, FileText, Sticker, Pin, PinOff, LogOut as LeaveIcon, Users, BellOff, Bell } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { stripFormatting } from "@/lib/format-message";
+import { useChatMuted, setChatMute, muteFor } from "@/lib/chat-mute";
 import { useChats, useDeleteChat, useBlockUser, useUnblockUser, useBlockStatus, usePinChat, useUnpinChat, useLeaveGroup } from "@/hooks/use-chats";
 import { useUserStatus } from "@/hooks/use-user-status";
 import { 
@@ -14,7 +15,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, ContextMenuTrigger, ContextMenuSub, ContextMenuSubTrigger, ContextMenuSubContent } from "@/components/ui/context-menu";
 import { ProfileSettings } from "./profile-settings";
 import { UserSearch } from "./user-search";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -74,6 +75,7 @@ function ChatSidebarItem({
   const unpinMutation = useUnpinChat();
   const leaveGroupMutation = useLeaveGroup();
   const [, navigate] = useLocation();
+  const chatMuted = useChatMuted(chat.id);
 
   // Check if this chat is pinned by the current user
   const myMembership = chat.members?.find((m: any) => m.userId === user?.id);
@@ -104,8 +106,9 @@ function ChatSidebarItem({
 
         <div className="flex-1 overflow-hidden">
           <div className="flex justify-between items-baseline mb-1">
-            <span className="font-semibold truncate text-[15px] text-sidebar-foreground group-hover:text-sidebar-foreground">
+            <span className="font-semibold truncate text-[15px] text-sidebar-foreground group-hover:text-sidebar-foreground flex items-center gap-1">
               {displayName}
+              {chatMuted && <BellOff className="w-3 h-3 text-muted-foreground shrink-0" />}
             </span>
             {lastMsg && (
               <span className="text-[11px] whitespace-nowrap ml-2 text-sidebar-foreground/50 group-hover:text-sidebar-foreground/80 flex items-center gap-1">
@@ -174,6 +177,27 @@ function ChatSidebarItem({
             <Pin className="w-4 h-4 mr-2" />
             Pin
           </ContextMenuItem>
+        )}
+        {chatMuted ? (
+          <ContextMenuItem onClick={() => setChatMute(chat.id, null)}>
+            <Bell className="w-4 h-4 mr-2" />
+            Unmute
+          </ContextMenuItem>
+        ) : (
+          <ContextMenuSub>
+            <ContextMenuSubTrigger>
+              <BellOff className="w-4 h-4 mr-2" />
+              Mute
+            </ContextMenuSubTrigger>
+            <ContextMenuSubContent>
+              <ContextMenuItem onClick={() => setChatMute(chat.id, muteFor(1))}>1 hour</ContextMenuItem>
+              <ContextMenuItem onClick={() => setChatMute(chat.id, muteFor(8))}>8 hours</ContextMenuItem>
+              <ContextMenuItem onClick={() => setChatMute(chat.id, muteFor(24))}>1 day</ContextMenuItem>
+              <ContextMenuItem onClick={() => setChatMute(chat.id, muteFor(24 * 7))}>1 week</ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem onClick={() => setChatMute(chat.id, "forever")}>Mute forever</ContextMenuItem>
+            </ContextMenuSubContent>
+          </ContextMenuSub>
         )}
         <ContextMenuSeparator />
         <ContextMenuItem

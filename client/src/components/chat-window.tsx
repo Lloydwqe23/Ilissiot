@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, useMemo, ReactNode } from "react";
+import { useEffect, useRef, useState, useMemo, useCallback, ReactNode } from "react";
 import { format, isToday, isYesterday } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, CheckCircle2, Smile, Phone, Video, Mic, StopCircle, Ban, Search, Pencil, Check, Play, Pause, Download, Reply, Share2, FileText, FileSpreadsheet, FileType, File as FileIcon, Presentation, FileArchive, FileCode, Users, UserPlus, UserMinus, Crown, Maximize, ScreenShare, Pin, BarChart3, Link2, Paintbrush, Shield, CalendarDays } from "lucide-react";
+import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, CheckCircle2, Smile, Phone, Video, Mic, StopCircle, Ban, Search, Pencil, Check, Play, Pause, Download, Reply, Share2, FileText, FileSpreadsheet, FileType, File as FileIcon, Presentation, FileArchive, FileCode, Users, UserPlus, UserMinus, Crown, Maximize, ScreenShare, Pin, BarChart3, Link2, Paintbrush, Shield, CalendarDays, BellOff, Bell, ZoomIn, ZoomOut, RotateCcw, ChevronLeft, ChevronRight } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useChat, useChats, useBlockStatus, useBlockUser, useUnblockUser, useLeaveGroup, useAddGroupMembers, useRemoveGroupMember, useUpdateGroupChat, usePinMessage, useUnpinMessage, useCreateDirectChat } from "@/hooks/use-chats";
 import { useMessages, useSendMessage, useMarkMessagesRead, useDeleteMessages, useEditMessage, useAddReaction, useRemoveReaction } from "@/hooks/use-messages";
@@ -27,6 +27,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { getChatBackground, setChatBackground, findBackground, getCustomBackgroundUrl, setCustomBackgroundUrl, removeCustomBackground, buildCustomBackgroundStyle } from "@/lib/chat-backgrounds";
 import { formatMessageContent } from "@/lib/format-message";
+import { useChatMuted, setChatMute, getMuteLabel, muteFor } from "@/lib/chat-mute";
 import { useLocation } from "wouter";
 
 /** Audio message component with custom waveform player */
@@ -1169,6 +1170,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const addReaction = useAddReaction(chatId);
   const removeReaction = useRemoveReaction(chatId);
   const call = useCall();
+  const chatMuted = useChatMuted(chatId);
 
   const [inputValue, setInputValue] = useState("");
   const [attachments, setAttachments] = useState<Array<{name: string; url: string; type: string}>>([]);
@@ -1220,6 +1222,43 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const [profileUser, setProfileUser] = useState<any>(null);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [imagePreview, setImagePreview] = useState<{ url: string; name: string } | null>(null);
+  const [imageZoom, setImageZoom] = useState(1);
+  const [imagePan, setImagePan] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
+
+  // Build flat list of all images in the chat for gallery navigation (excludes GIFs)
+  const allChatImages = useMemo(() => {
+    if (!messages) return [] as { url: string; name: string }[];
+    const imgs: { url: string; name: string }[] = [];
+    for (const msg of messages) {
+      if (!msg.attachments) continue;
+      for (const att of msg.attachments as any[]) {
+        const ext = (att.name || '').split('.').pop()?.toLowerCase() || '';
+        const mime = (att.type || '').toLowerCase();
+        const isGif = mime === 'image/gif' || ext === 'gif';
+        if (isGif) continue;
+        if (mime.startsWith('image/') || ['png','jpg','jpeg','webp','bmp','svg'].includes(ext)) {
+          imgs.push({ url: att.url, name: att.name || 'Image' });
+        }
+      }
+    }
+    return imgs;
+  }, [messages]);
+
+  const currentImageIndex = imagePreview
+    ? allChatImages.findIndex(img => img.url === imagePreview.url)
+    : -1;
+
+  const resetZoom = useCallback(() => { setImageZoom(1); setImagePan({ x: 0, y: 0 }); }, []);
+
+  const navigateImage = useCallback((dir: 1 | -1) => {
+    if (currentImageIndex < 0 || allChatImages.length === 0) return;
+    const next = currentImageIndex + dir;
+    if (next < 0 || next >= allChatImages.length) return;
+    setImagePreview(allChatImages[next]);
+    resetZoom();
+  }, [currentImageIndex, allChatImages, resetZoom]);
 
   // group info dialog state
   const [groupInfoOpen, setGroupInfoOpen] = useState(false);
@@ -1498,10 +1537,10 @@ export function ChatWindow({ chatId }: { chatId: number }) {
           // Render GIF images and GIF mp4 videos as looping silent videos
           if (isGif || isGifVideo) {
             return (
-              <div key={idx} className="rounded-lg overflow-hidden max-w-xs">
+              <div key={idx} className="rounded-lg overflow-hidden max-w-xs w-full">
                 <video
                   src={file.url}
-                  className="max-w-xs max-h-96 rounded-lg"
+                  className="w-full max-h-96 rounded-lg"
                   loop
                   muted
                   autoPlay
@@ -1526,7 +1565,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                 }}
                 className="block rounded-lg overflow-hidden hover:opacity-90 transition-opacity"
               >
-                <img src={file.url} alt={file.name} className="max-w-xs max-h-96 rounded-lg" />
+                <img src={file.url} alt={file.name} className="max-w-xs w-full max-h-96 rounded-lg" />
               </button>
             );
           } else if (isVideo) {
@@ -2513,7 +2552,10 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                   }
                 }}
               >
-                <h2 className="font-semibold text-[15px] leading-tight text-foreground">{displayName}</h2>
+                <h2 className="font-semibold text-[15px] leading-tight text-foreground flex items-center gap-1.5">
+                  {displayName}
+                  {chatMuted && <BellOff className="w-3.5 h-3.5 text-muted-foreground" />}
+                </h2>
                 <span className={`text-[12px] ${typingLabel ? 'text-primary font-medium' : !chat.isGroup && statusText === 'online' ? 'text-green-500 font-medium' : 'text-muted-foreground'}`}>
                   {typingLabel ? (
                     <span className="inline-flex items-baseline">
@@ -2623,6 +2665,44 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                     <Paintbrush className="w-4 h-4 mr-2" />
                     Change Background
                   </DropdownMenuItem>
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger>
+                      {chatMuted ? (
+                        <><BellOff className="w-4 h-4 mr-2" /> Muted</>  
+                      ) : (
+                        <><Bell className="w-4 h-4 mr-2" /> Notifications</>  
+                      )}
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent>
+                      {chatMuted ? (
+                        <DropdownMenuItem onClick={() => setChatMute(chatId, null)}>
+                          <Bell className="w-4 h-4 mr-2" />
+                          Unmute
+                        </DropdownMenuItem>
+                      ) : (
+                        <>
+                          <DropdownMenuLabel className="text-xs">Mute for…</DropdownMenuLabel>
+                          <DropdownMenuItem onClick={() => { setChatMute(chatId, muteFor(1)); }}>
+                            1 hour
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => { setChatMute(chatId, muteFor(8)); }}>
+                            8 hours
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => { setChatMute(chatId, muteFor(24)); }}>
+                            1 day
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => { setChatMute(chatId, muteFor(24 * 7)); }}>
+                            1 week
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={() => { setChatMute(chatId, "forever"); }}>
+                            <BellOff className="w-4 h-4 mr-2" />
+                            Mute forever
+                          </DropdownMenuItem>
+                        </>
+                      )}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => handleClearHistoryForMe()}>Clear history for me</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => handleClearHistoryForAll()}>Clear history for everyone</DropdownMenuItem>
@@ -3636,24 +3716,141 @@ export function ChatWindow({ chatId }: { chatId: number }) {
         </DialogContent>
       </Dialog>
 
-      {/* In-chat image preview */}
-      <Dialog open={!!imagePreview} onOpenChange={(open) => { if (!open) setImagePreview(null); }}>
-        <DialogContent className="sm:max-w-[900px] p-0 overflow-hidden" aria-describedby={undefined}>
-          <DialogHeader className="p-4 border-b border-border/50">
-            <DialogTitle className="truncate">{imagePreview?.name || 'Image'}</DialogTitle>
+      {/* In-chat image preview with zoom and gallery navigation */}
+      <Dialog open={!!imagePreview} onOpenChange={(open) => { if (!open) { setImagePreview(null); resetZoom(); } }}>
+        <DialogContent className="sm:max-w-[95vw] md:max-w-[900px] max-h-[95vh] p-0 overflow-hidden [&>button:last-child]:hidden" aria-describedby={undefined}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowLeft') navigateImage(-1);
+            else if (e.key === 'ArrowRight') navigateImage(1);
+            else if (e.key === '+' || e.key === '=') setImageZoom(z => Math.min(z + 0.25, 5));
+            else if (e.key === '-') setImageZoom(z => Math.max(z - 0.25, 0.25));
+            else if (e.key === '0') resetZoom();
+          }}
+        >
+          {/* Header with title and zoom controls */}
+          <DialogHeader className="p-3 border-b border-border/50">
+            <div className="flex items-center justify-between gap-2">
+              <DialogTitle className="truncate text-sm flex-1">
+                {imagePreview?.name || 'Image'}
+                {allChatImages.length > 1 && currentImageIndex >= 0 && (
+                  <span className="text-muted-foreground font-normal ml-2">
+                    {currentImageIndex + 1} / {allChatImages.length}
+                  </span>
+                )}
+              </DialogTitle>
+              <div className="flex items-center gap-1 shrink-0">
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => {
+                  setImageZoom(z => {
+                    const next = Math.max(z - 0.25, 0.25);
+                    if (next <= 1) setImagePan({ x: 0, y: 0 });
+                    else setImagePan(p => ({ x: p.x * (next / z), y: p.y * (next / z) }));
+                    return next;
+                  });
+                }} title="Zoom out">
+                  <ZoomOut className="w-4 h-4" />
+                </Button>
+                <button
+                  className="text-xs text-muted-foreground hover:text-foreground min-w-[3rem] text-center"
+                  onClick={resetZoom}
+                  title="Reset zoom"
+                >
+                  {Math.round(imageZoom * 100)}%
+                </button>
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => {
+                  setImageZoom(z => {
+                    const next = Math.min(z + 0.25, 5);
+                    setImagePan(p => ({ x: p.x * (next / z), y: p.y * (next / z) }));
+                    return next;
+                  });
+                }} title="Zoom in">
+                  <ZoomIn className="w-4 h-4" />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={resetZoom} title="Reset">
+                  <RotateCcw className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
           </DialogHeader>
-          <div className="flex items-center justify-center bg-black/90 p-4">
+
+          {/* Image area with pan/zoom */}
+          <div
+            className="relative flex items-center justify-center bg-black/90 select-none overflow-hidden"
+            style={{ height: 'calc(95vh - 130px)', cursor: imageZoom > 1 ? (isDragging ? 'grabbing' : 'grab') : 'default' }}
+            onWheel={(e) => {
+              e.preventDefault();
+              const delta = e.deltaY > 0 ? -0.15 : 0.15;
+              setImageZoom(z => {
+                const next = Math.max(0.25, Math.min(5, z + delta));
+                // Reset pan when zooming back to fit
+                if (next <= 1) {
+                  setImagePan({ x: 0, y: 0 });
+                } else {
+                  // Scale pan proportionally so image stays centered
+                  setImagePan(p => ({
+                    x: p.x * (next / z),
+                    y: p.y * (next / z),
+                  }));
+                }
+                return next;
+              });
+            }}
+            onMouseDown={(e) => {
+              if (imageZoom <= 1) return;
+              e.preventDefault();
+              setIsDragging(true);
+              dragStart.current = { x: e.clientX, y: e.clientY, panX: imagePan.x, panY: imagePan.y };
+            }}
+            onMouseMove={(e) => {
+              if (!isDragging) return;
+              setImagePan({
+                x: dragStart.current.panX + (e.clientX - dragStart.current.x),
+                y: dragStart.current.panY + (e.clientY - dragStart.current.y),
+              });
+            }}
+            onMouseUp={() => setIsDragging(false)}
+            onMouseLeave={() => setIsDragging(false)}
+            onDoubleClick={() => {
+              if (imageZoom === 1) { setImageZoom(2); } else { resetZoom(); }
+            }}
+          >
+            {/* Previous button */}
+            {allChatImages.length > 1 && currentImageIndex > 0 && (
+              <button
+                className="absolute left-2 top-1/2 -translate-y-1/2 z-10 bg-black/60 hover:bg-black/80 text-white rounded-full w-10 h-10 flex items-center justify-center transition-colors"
+                onClick={(e) => { e.stopPropagation(); navigateImage(-1); }}
+              >
+                <ChevronLeft className="w-6 h-6" />
+              </button>
+            )}
+
             {imagePreview && (
               <img
                 src={imagePreview.url}
                 alt={imagePreview.name}
-                className="max-w-full max-h-[75vh] object-contain rounded"
+                className={`max-w-full max-h-full object-contain rounded ${isDragging ? '' : 'transition-transform duration-150'}`}
+                style={{
+                  transform: `scale(${imageZoom}) translate(${imagePan.x / imageZoom}px, ${imagePan.y / imageZoom}px)`,
+                }}
+                draggable={false}
               />
             )}
+
+            {/* Next button */}
+            {allChatImages.length > 1 && currentImageIndex < allChatImages.length - 1 && (
+              <button
+                className="absolute right-2 top-1/2 -translate-y-1/2 z-10 bg-black/60 hover:bg-black/80 text-white rounded-full w-10 h-10 flex items-center justify-center transition-colors"
+                onClick={(e) => { e.stopPropagation(); navigateImage(1); }}
+              >
+                <ChevronRight className="w-6 h-6" />
+              </button>
+            )}
           </div>
-          <div className="p-4 flex justify-end gap-2">
+
+          {/* Footer */}
+          <div className="p-3 flex justify-end gap-2 border-t border-border/50">
             <Button
               variant="outline"
+              size="sm"
               onClick={() => {
                 if (!imagePreview) return;
                 const a = document.createElement('a');
@@ -3665,7 +3862,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
               <Download className="w-4 h-4 mr-2" />
               Download
             </Button>
-            <Button variant="ghost" onClick={() => setImagePreview(null)}>Close</Button>
+            <Button variant="ghost" size="sm" onClick={() => { setImagePreview(null); resetZoom(); }}>Close</Button>
           </div>
         </DialogContent>
       </Dialog>

@@ -4,10 +4,19 @@ import { api, WS_EVENTS, type MessageResponse, type ChatResponse } from '@shared
 import { setUserStatus, setOnlineUsers } from './use-user-status';
 import { setTypingStart, setTypingStop, setWsSendForTyping } from './use-typing';
 import { useCall } from './use-call';
+import { isChatMuted } from '@/lib/chat-mute';
 
 export function useChatWebSocket(
   userId: string | undefined, 
-  onMessageReceived?: (senderName: string, message: string, senderImage?: string) => void,
+  onMessageReceived?: (opts: {
+    chatId: number;
+    chatName?: string;
+    isGroup?: boolean;
+    senderName: string;
+    message: string;
+    senderImage?: string;
+    chatImage?: string;
+  }) => void,
   activeChatId?: number | null
 ) {
   const queryClient = useQueryClient();
@@ -77,12 +86,28 @@ export function useChatWebSocket(
 
             // Trigger notification for incoming messages from other users in different chats
             if (onMessageReceivedRef.current && message.senderId !== userId && message.chatId !== activeChatIdRef.current) {
-              const senderName = (message as any).sender 
-                ? [(message as any).sender.firstName, (message as any).sender.lastName].filter(Boolean).join(' ') || (message as any).sender.email || 'Unknown'
-                : 'Unknown';
-              const messagePreview = message.content?.substring(0, 100) || '📎 Attachment';
-              const senderImage = (message as any).sender?.profileImageUrl;
-              onMessageReceivedRef.current(senderName, messagePreview, senderImage);
+              // Skip if this chat is muted
+              if (!isChatMuted(message.chatId)) {
+                const senderName = (message as any).sender 
+                  ? [(message as any).sender.firstName, (message as any).sender.lastName].filter(Boolean).join(' ') || (message as any).sender.email || 'Unknown'
+                  : 'Unknown';
+                const messagePreview = message.content?.substring(0, 100) || '📎 Attachment';
+                const senderImage = (message as any).sender?.profileImageUrl;
+
+                // Look up chat info from cache for group name
+                const chats = queryClient.getQueryData<ChatResponse[]>([api.chats.list.path]);
+                const chatInfo = chats?.find(c => c.id === message.chatId);
+
+                onMessageReceivedRef.current({
+                  chatId: message.chatId,
+                  chatName: chatInfo?.name || undefined,
+                  chatImage: chatInfo?.avatarUrl || undefined,
+                  isGroup: !!chatInfo?.isGroup,
+                  senderName,
+                  message: messagePreview,
+                  senderImage,
+                });
+              }
             }
 
             // 1. Append to the open chat's message list
