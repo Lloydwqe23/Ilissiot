@@ -548,7 +548,12 @@ function GroupInfoDialog({
             createdAt: msg.createdAt,
             senderName
           });
-        } else if (!mimeType.startsWith('image/') && !mimeType.startsWith('video/') && !mimeType.startsWith('audio/')) {
+        } else if (
+          !mimeType.startsWith('image/') && !mimeType.startsWith('video/') && !mimeType.startsWith('audio/') && !mimeType.startsWith('call/')
+          && att.type !== 'reply' && att.type !== 'forward' && att.type !== 'sticker'
+          && att.name !== 'call' && att.name !== 'poll'
+          && !(att.url && att.url.startsWith('{'))
+        ) {
           // It's a document/file
           documents.push({
             id: msg.id,
@@ -1471,9 +1476,9 @@ export function ChatWindow({ chatId }: { chatId: number }) {
     const onlyStickers = files.every(f => f.type === 'sticker');
     if (onlyStickers) {
       return (
-        <div className="mt-3 flex items-center justify-center space-x-2">
+        <div className="flex items-center space-x-2" style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))' }}>
           {files.map((f, idx) => (
-            <span key={idx} className="text-4xl">{f.name}</span>
+            <span key={idx} className="text-7xl leading-none">{f.name}</span>
           ))}
         </div>
       );
@@ -2831,6 +2836,10 @@ export function ChatWindow({ chatId }: { chatId: number }) {
             <AnimatePresence initial={false}>
               {messages?.map((msg, idx) => {
                 const isMine = msg.senderId === user?.id;
+                const nonMetaAttachments = msg.attachments ? (msg.attachments as any[]).filter((a: any) => a.type !== 'reply' && a.type !== 'forward') : [];
+                const isStickerOnly = !msg.content && nonMetaAttachments.length > 0 && nonMetaAttachments.every((a: any) => a.type === 'sticker');
+                const isEmojiOnly = !!(msg.content && onlyEmoji(msg.content) && nonMetaAttachments.length === 0 && !(msg as any).poll);
+                const isBubbleless = isStickerOnly || isEmojiOnly;
                 const showAvatar = !isMine && (!messages[idx - 1] || messages[idx - 1].senderId !== msg.senderId);
                 const isSelected = selectedMessages.has(msg.id);
                 const isCurrentMatch = isSearching && allMatches.length > 0 && allMatches[currentMatchIndex]?.messageId === msg.id;
@@ -2918,10 +2927,13 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                       </div>
                     )}
 
-                    <div className={`group relative max-w-[75%] md:max-w-[60%] px-4 py-2.5 shadow-sm transition-all
-                      ${isMine
-                        ? 'bg-primary text-primary-foreground rounded-2xl rounded-br-sm'
-                        : 'bg-card text-card-foreground rounded-2xl rounded-bl-sm border border-border/50'
+                    <div className={`group relative max-w-[75%] md:max-w-[60%] transition-all
+                      ${isBubbleless
+                        ? 'px-1 py-1'
+                        : `px-4 py-2.5 shadow-sm ${isMine
+                            ? 'bg-primary text-primary-foreground rounded-2xl rounded-br-sm'
+                            : 'bg-card text-card-foreground rounded-2xl rounded-bl-sm border border-border/50'
+                          }`
                       }
                       ${isSelected ? 'ring-2 ring-primary/50 scale-[0.98]' : ''}
                       ${isCurrentMatch ? 'ring-2 ring-amber-500 scale-[1.02] shadow-lg shadow-amber-500/30' : hasMatch && isSearching ? 'ring-1 ring-amber-400/50' : ''}
@@ -3004,7 +3016,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                         const emojiOnly = onlyEmoji(msg.content) && !(msg.attachments && msg.attachments.length);
                         if (emojiOnly) {
                           return (
-                            <div className="mt-1 flex items-center justify-center space-x-1 text-4xl">
+                            <div className="flex items-center space-x-1 text-5xl" style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))' }}>
                               {Array.from(msg.content).map((ch, i) => <span key={i}>{ch}</span>)}
                             </div>
                           );
@@ -3031,7 +3043,11 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                         </div>
                       )}
 
-                      <div className={`flex items-center justify-end gap-1 mt-1 ${isMine ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
+                      <div className={`flex items-center justify-end gap-1 mt-1 ${
+                        isBubbleless
+                          ? 'bg-black/50 text-white/90 rounded-full px-2 py-0.5 w-fit ml-auto'
+                          : isMine ? 'text-primary-foreground/70' : 'text-muted-foreground'
+                      }`}>
                         {msg.isEdited && (
                           <span className="text-[10px] italic mr-1">edited</span>
                         )}
