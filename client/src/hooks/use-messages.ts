@@ -67,6 +67,8 @@ export function useDeleteMessages(chatId: number) {
       queryClient.invalidateQueries({ queryKey: [api.messages.list.path, chatId.toString()] });
       // Also invalidate chats list (last message may have changed)
       queryClient.invalidateQueries({ queryKey: [api.chats.list.path] });
+      // Remove deleted messages from pinned list
+      queryClient.invalidateQueries({ queryKey: ['pinned-messages', chatId] });
     },
   });
 }

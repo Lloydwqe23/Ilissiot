@@ -199,6 +199,11 @@ export function useChatWebSocket(
             queryClient.invalidateQueries({
               queryKey: [api.chats.list.path],
             });
+
+            // Remove deleted messages from pinned list
+            queryClient.invalidateQueries({
+              queryKey: ['pinned-messages', chatId],
+            });
           }
 
           // ── User status change (single user) ─────────────────────
