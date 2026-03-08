@@ -3734,7 +3734,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
 
       {/* In-chat image preview with zoom and gallery navigation */}
       <Dialog open={!!imagePreview} onOpenChange={(open) => { if (!open) { setImagePreview(null); resetZoom(); } }}>
-        <DialogContent className="sm:max-w-[95vw] md:max-w-[900px] max-h-[95vh] p-0 overflow-hidden [&>button:last-child]:hidden" aria-describedby={undefined}
+        <DialogContent className="max-w-[100vw] sm:max-w-[95vw] md:max-w-[900px] max-h-dvh sm:max-h-[95vh] h-dvh sm:h-[85vh] w-full p-0 overflow-hidden rounded-none sm:rounded-lg gap-0 flex flex-col [&>button:last-child]:hidden" aria-describedby={undefined}
           onKeyDown={(e) => {
             if (e.key === 'ArrowLeft') navigateImage(-1);
             else if (e.key === 'ArrowRight') navigateImage(1);
@@ -3744,18 +3744,21 @@ export function ChatWindow({ chatId }: { chatId: number }) {
           }}
         >
           {/* Header with title and zoom controls */}
-          <DialogHeader className="p-3 border-b border-border/50">
-            <div className="flex items-center justify-between gap-2">
-              <DialogTitle className="truncate text-sm flex-1">
+          <DialogHeader className="p-2 sm:p-3 border-b border-border/50 shrink-0">
+            <div className="flex items-center justify-between gap-1 sm:gap-2">
+              <Button variant="ghost" size="icon" className="h-8 w-8 sm:hidden shrink-0" onClick={() => { setImagePreview(null); resetZoom(); }}>
+                <ArrowLeft className="w-4 h-4" />
+              </Button>
+              <DialogTitle className="truncate text-xs sm:text-sm flex-1 min-w-0">
                 {imagePreview?.name || 'Image'}
                 {allChatImages.length > 1 && currentImageIndex >= 0 && (
-                  <span className="text-muted-foreground font-normal ml-2">
-                    {currentImageIndex + 1} / {allChatImages.length}
+                  <span className="text-muted-foreground font-normal ml-1 sm:ml-2">
+                    {currentImageIndex + 1}/{allChatImages.length}
                   </span>
                 )}
               </DialogTitle>
-              <div className="flex items-center gap-1 shrink-0">
-                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => {
+              <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
+                <Button variant="ghost" size="icon" className="h-7 w-7 sm:h-8 sm:w-8" onClick={() => {
                   setImageZoom(z => {
                     const next = Math.max(z - 0.25, 0.25);
                     if (next <= 1) setImagePan({ x: 0, y: 0 });
@@ -3763,26 +3766,26 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                     return next;
                   });
                 }} title="Zoom out">
-                  <ZoomOut className="w-4 h-4" />
+                  <ZoomOut className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 </Button>
                 <button
-                  className="text-xs text-muted-foreground hover:text-foreground min-w-[3rem] text-center"
+                  className="text-[10px] sm:text-xs text-muted-foreground hover:text-foreground min-w-[2.5rem] sm:min-w-[3rem] text-center"
                   onClick={resetZoom}
                   title="Reset zoom"
                 >
                   {Math.round(imageZoom * 100)}%
                 </button>
-                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => {
+                <Button variant="ghost" size="icon" className="h-7 w-7 sm:h-8 sm:w-8" onClick={() => {
                   setImageZoom(z => {
                     const next = Math.min(z + 0.25, 5);
                     setImagePan(p => ({ x: p.x * (next / z), y: p.y * (next / z) }));
                     return next;
                   });
                 }} title="Zoom in">
-                  <ZoomIn className="w-4 h-4" />
+                  <ZoomIn className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 </Button>
-                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={resetZoom} title="Reset">
-                  <RotateCcw className="w-4 h-4" />
+                <Button variant="ghost" size="icon" className="h-7 w-7 sm:h-8 sm:w-8" onClick={resetZoom} title="Reset">
+                  <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 </Button>
               </div>
             </div>
@@ -3790,8 +3793,8 @@ export function ChatWindow({ chatId }: { chatId: number }) {
 
           {/* Image area with pan/zoom */}
           <div
-            className="relative flex items-center justify-center bg-black/90 select-none overflow-hidden"
-            style={{ height: 'calc(95vh - 130px)', cursor: imageZoom > 1 ? (isDragging ? 'grabbing' : 'grab') : 'default' }}
+            className="relative flex-1 flex items-center justify-center bg-black/90 select-none overflow-hidden min-h-0"
+            style={{ cursor: imageZoom > 1 ? (isDragging ? 'grabbing' : 'grab') : 'default' }}
             onWheel={(e) => {
               e.preventDefault();
               const delta = e.deltaY > 0 ? -0.15 : 0.15;
@@ -3825,6 +3828,21 @@ export function ChatWindow({ chatId }: { chatId: number }) {
             }}
             onMouseUp={() => setIsDragging(false)}
             onMouseLeave={() => setIsDragging(false)}
+            onTouchStart={(e) => {
+              if (imageZoom <= 1 || e.touches.length !== 1) return;
+              const t = e.touches[0];
+              setIsDragging(true);
+              dragStart.current = { x: t.clientX, y: t.clientY, panX: imagePan.x, panY: imagePan.y };
+            }}
+            onTouchMove={(e) => {
+              if (!isDragging || e.touches.length !== 1) return;
+              const t = e.touches[0];
+              setImagePan({
+                x: dragStart.current.panX + (t.clientX - dragStart.current.x),
+                y: dragStart.current.panY + (t.clientY - dragStart.current.y),
+              });
+            }}
+            onTouchEnd={() => setIsDragging(false)}
             onDoubleClick={() => {
               if (imageZoom === 1) { setImageZoom(2); } else { resetZoom(); }
             }}
@@ -3863,7 +3881,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
           </div>
 
           {/* Footer */}
-          <div className="p-3 flex justify-end gap-2 border-t border-border/50">
+          <div className="p-2 sm:p-3 flex justify-end gap-2 border-t border-border/50 shrink-0">
             <Button
               variant="outline"
               size="sm"
