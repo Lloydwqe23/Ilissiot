@@ -4,6 +4,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAuth } from "@/hooks/use-auth";
+import { resolveLanguage, translate } from "@/lib/i18n";
 
 interface PinnedMessagesBarProps {
   chatId: number;
@@ -13,6 +15,9 @@ interface PinnedMessagesBarProps {
 }
 
 export function PinnedMessagesBar({ chatId, currentUserId, isAdmin, onNavigateToMessage }: PinnedMessagesBarProps) {
+  const { user } = useAuth();
+  const language = resolveLanguage(user?.language);
+  const t = (key: string) => translate(language, key);
   const { data: pinnedMessages } = usePinnedMessages(chatId);
   const unpinMessage = useUnpinMessage();
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -73,11 +78,11 @@ export function PinnedMessagesBar({ chatId, currentUserId, isAdmin, onNavigateTo
               </AvatarFallback>
             </Avatar>
             <span className="text-xs font-semibold text-foreground">
-              {currentPinned.message.sender?.firstName || 'Unknown'}
+              {currentPinned.message.sender?.firstName || t("profile.unknown")}
             </span>
           </div>
           <p className="text-sm truncate text-foreground/80">
-            {currentPinned.message.content || '📎 Attachment'}
+            {currentPinned.message.content || t("pinned.attachment")}
           </p>
         </div>
 

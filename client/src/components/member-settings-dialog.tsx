@@ -7,6 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Crown, Shield, ShieldCheck, Tag, Save, Loader2 } from "lucide-react";
 import { useUpdateMemberRole, useUpdateMemberTitle, useUpdateMemberPermissions } from "@/hooks/use-chats";
+import { useAuth } from "@/hooks/use-auth";
+import { resolveLanguage, translate } from "@/lib/i18n";
 
 // Available custom permissions
 const PERMISSION_OPTIONS = [
@@ -34,6 +36,9 @@ export function MemberSettingsDialog({
   isCurrentUserAdmin,
 }: MemberSettingsDialogProps) {
   const user = member?.user;
+  const { user: currentUser } = useAuth();
+  const language = resolveLanguage(currentUser?.language);
+  const t = (key: string) => translate(language, key);
   const memberName = [user?.firstName, user?.lastName].filter(Boolean).join(" ") || user?.email || "Unknown";
 
   const [title, setTitle] = useState(member?.title || "");
@@ -73,7 +78,7 @@ export function MemberSettingsDialog({
       }
       onOpenChange(false);
     } catch (err: any) {
-      alert(err.message || "Failed to save changes");
+      alert(err.message || t("member.saveFailed"));
     }
   };
 
@@ -111,17 +116,17 @@ export function MemberSettingsDialog({
           <div className="space-y-2">
             <Label className="flex items-center gap-2 text-sm font-medium">
               <Tag className="w-4 h-4 text-primary" />
-              Custom Title
+              {t("member.customTitle")}
             </Label>
             <Input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Designer, Moderator, VIP..."
+              placeholder={t("member.customTitlePlaceholder")}
               maxLength={100}
               disabled={!isCurrentUserAdmin}
             />
             <p className="text-xs text-muted-foreground">
-              Shown next to this member's name in the group
+              {t("member.customTitleHelp")}
             </p>
           </div>
 
@@ -131,7 +136,7 @@ export function MemberSettingsDialog({
           <div className="space-y-3">
             <Label className="flex items-center gap-2 text-sm font-medium">
               <Crown className="w-4 h-4 text-primary" />
-              Role
+              {t("member.role")}
             </Label>
             <div className="flex gap-2">
               <Button
@@ -142,7 +147,7 @@ export function MemberSettingsDialog({
                 disabled={!isCurrentUserAdmin}
               >
                 <Crown className="w-3.5 h-3.5" />
-                Admin
+                {t("member.admin")}
               </Button>
               <Button
                 variant={!isAdmin ? "default" : "outline"}
@@ -152,13 +157,13 @@ export function MemberSettingsDialog({
                 disabled={!isCurrentUserAdmin}
               >
                 <Shield className="w-3.5 h-3.5" />
-                Member
+                {t("member.member")}
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
               {isAdmin
-                ? "Admins have full control over the group"
-                : "Members have standard access. Use custom permissions below to grant specific abilities."}
+                ? t("member.adminHelp")
+                : t("member.memberHelp")}
             </p>
           </div>
 
@@ -168,11 +173,11 @@ export function MemberSettingsDialog({
           <div className="space-y-3">
             <Label className="flex items-center gap-2 text-sm font-medium">
               <ShieldCheck className="w-4 h-4 text-primary" />
-              Custom Permissions
+              {t("member.customPermissions")}
             </Label>
             {isAdmin ? (
               <p className="text-xs text-muted-foreground italic">
-                Admins automatically have all permissions
+                {t("member.adminAllPermissions")}
               </p>
             ) : (
               <div className="space-y-1">
@@ -198,8 +203,8 @@ export function MemberSettingsDialog({
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium">{perm.label}</p>
-                      <p className="text-xs text-muted-foreground">{perm.description}</p>
+                      <p className="text-sm font-medium">{t(`member.permission.${perm.key}.label`)}</p>
+                      <p className="text-xs text-muted-foreground">{t(`member.permission.${perm.key}.description`)}</p>
                     </div>
                   </button>
                 ))}
@@ -211,11 +216,11 @@ export function MemberSettingsDialog({
         {isCurrentUserAdmin && (
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button onClick={handleSave} disabled={isSaving} className="gap-2">
               {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              Save
+              {t("common.save")}
             </Button>
           </div>
         )}

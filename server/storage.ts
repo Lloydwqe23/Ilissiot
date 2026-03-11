@@ -28,7 +28,7 @@ import { randomBytes } from "crypto";
  * Returns `any` intentionally – the type system's `User` includes these fields
  * but they must NOT reach the client. */
 function sanitizeUser(user: Record<string, any>): any {
-  const { password, email, theme, colorTheme, fontType, textSize, createdAt, updatedAt, ...safe } = user;
+  const { password, email, theme, language, colorTheme, fontType, textSize, createdAt, updatedAt, ...safe } = user;
   return safe;
 }
 

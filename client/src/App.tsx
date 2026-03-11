@@ -13,6 +13,7 @@ import { CallProvider } from "@/hooks/use-call";
 import { CallOverlay } from "@/components/call-overlay";
 import { Loader2 } from "lucide-react";
 import { ThemeProvider, useTheme } from "next-themes";
+import { resolveLanguage } from "@/lib/i18n";
 
 // Wrapper component to handle routing based on Auth state
 function RootRouter() {
@@ -77,6 +78,11 @@ function ThemeInitializer() {
     // Apply global text size scale
     document.documentElement.classList.remove(...textSizeClasses);
     document.documentElement.classList.add(`text-size-${user?.textSize || 'normal'}`);
+
+    // Apply selected app language to the document and remember it for logged-out screens.
+    const appLanguage = resolveLanguage(user?.language);
+    document.documentElement.lang = appLanguage;
+    localStorage.setItem("app.language", appLanguage);
   }, [user, setTheme]);
   return null;
 }

@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { format } from "date-fns";
+import { useAuth } from "@/hooks/use-auth";
+import { resolveLanguage, translate } from "@/lib/i18n";
 
 interface GroupInviteLinksDialogProps {
   open: boolean;
@@ -14,6 +16,9 @@ interface GroupInviteLinksDialogProps {
 }
 
 export function GroupInviteLinksDialog({ open, onOpenChange, chatId }: GroupInviteLinksDialogProps) {
+  const { user } = useAuth();
+  const language = resolveLanguage(user?.language);
+  const t = (key: string) => translate(language, key);
   const { data: inviteLinks, isLoading } = useInviteLinks(chatId);
   const createInviteLink = useCreateInviteLink();
   const revokeInviteLink = useRevokeInviteLink();
@@ -52,7 +57,7 @@ export function GroupInviteLinksDialog({ open, onOpenChange, chatId }: GroupInvi
   };
 
   const handleRevokeLink = (token: string) => {
-    if (confirm("Are you sure you want to revoke this invite link?")) {
+    if (confirm(t("invite.revokeConfirm"))) {
       revokeInviteLink.mutate(token);
     }
   };
@@ -63,10 +68,10 @@ export function GroupInviteLinksDialog({ open, onOpenChange, chatId }: GroupInvi
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Link2 className="w-5 h-5 text-primary" />
-            Group Invite Links
+            {t("invite.title")}
           </DialogTitle>
           <DialogDescription>
-            Create and manage invite links for this group. Anyone with a link can join.
+            {t("invite.description")}
           </DialogDescription>
         </DialogHeader>
 
@@ -79,36 +84,36 @@ export function GroupInviteLinksDialog({ open, onOpenChange, chatId }: GroupInvi
               variant="outline"
             >
               <Plus className="w-4 h-4 mr-2" />
-              Create New Invite Link
+              {t("invite.createNew")}
             </Button>
           )}
 
           {/* Create Link Form */}
           {showCreateForm && (
             <div className="space-y-4 p-4 border border-border rounded-lg bg-muted/30">
-              <h3 className="font-semibold text-sm">New Invite Link</h3>
+              <h3 className="font-semibold text-sm">{t("invite.newLink")}</h3>
 
               <div className="space-y-2">
-                <Label htmlFor="expiry">Expires after (days, optional)</Label>
+                <Label htmlFor="expiry">{t("invite.expiresAfter")}</Label>
                 <Input
                   id="expiry"
                   type="number"
                   min="1"
                   max="365"
-                  placeholder="Never expires"
+                  placeholder={t("invite.neverExpires")}
                   value={expiryDays || ""}
                   onChange={(e) => setExpiryDays(e.target.value ? parseInt(e.target.value) : undefined)}
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="maxUses">Maximum uses (optional)</Label>
+                <Label htmlFor="maxUses">{t("invite.maximumUses")}</Label>
                 <Input
                   id="maxUses"
                   type="number"
                   min="1"
                   max="1000"
-                  placeholder="Unlimited"
+                  placeholder={t("invite.unlimited")}
                   value={maxUses || ""}
                   onChange={(e) => setMaxUses(e.target.value ? parseInt(e.target.value) : undefined)}
                 />
@@ -120,7 +125,7 @@ export function GroupInviteLinksDialog({ open, onOpenChange, chatId }: GroupInvi
                   disabled={createInviteLink.isPending}
                   className="flex-1"
                 >
-                  {createInviteLink.isPending ? "Creating..." : "Create Link"}
+                  {createInviteLink.isPending ? t("invite.creating") : t("invite.createLink")}
                 </Button>
                 <Button
                   variant="outline"
@@ -130,7 +135,7 @@ export function GroupInviteLinksDialog({ open, onOpenChange, chatId }: GroupInvi
                     setMaxUses(undefined);
                   }}
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
               </div>
             </div>
@@ -139,11 +144,11 @@ export function GroupInviteLinksDialog({ open, onOpenChange, chatId }: GroupInvi
           {/* Existing Links */}
           {isLoading ? (
             <div className="text-center text-sm text-muted-foreground py-8">
-              Loading invite links...
+              {t("invite.loading")}
             </div>
           ) : inviteLinks && inviteLinks.length > 0 ? (
             <div className="space-y-3">
-              <h3 className="font-semibold text-sm">Active Links</h3>
+              <h3 className="font-semibold text-sm">{t("invite.activeLinks")}</h3>
               {inviteLinks
                 .filter((link: any) => link.isActive)
                 .map((link: any) => {
@@ -166,7 +171,7 @@ export function GroupInviteLinksDialog({ open, onOpenChange, chatId }: GroupInvi
                             </code>
                             {(isExpired || reachedMaxUses) && (
                               <span className="text-xs text-destructive font-medium">
-                                {isExpired ? "Expired" : "Max uses reached"}
+                                {isExpired ? t("invite.expired") : t("invite.maxUsesReached")}
                               </span>
                             )}
                           </div>
@@ -175,12 +180,12 @@ export function GroupInviteLinksDialog({ open, onOpenChange, chatId }: GroupInvi
                             {link.expiresAt && (
                               <span className="flex items-center gap-1">
                                 <Clock className="w-3 h-3" />
-                                Expires {format(new Date(link.expiresAt), "MMM d, yyyy")}
+                                {t("invite.expires")} {format(new Date(link.expiresAt), "MMM d, yyyy")}
                               </span>
                             )}
                             <span className="flex items-center gap-1">
                               <Users className="w-3 h-3" />
-                              {link.currentUses} {link.maxUses ? `/ ${link.maxUses}` : ""} uses
+                              {link.currentUses} {link.maxUses ? `/ ${link.maxUses}` : ""} {t("invite.uses")}
                             </span>
                           </div>
                         </div>
@@ -191,7 +196,7 @@ export function GroupInviteLinksDialog({ open, onOpenChange, chatId }: GroupInvi
                             variant="ghost"
                             onClick={() => handleCopyLink(link.token)}
                             className="h-8 w-8"
-                            title="Copy link"
+                            title={t("invite.copyLink")}
                           >
                             {isCopied ? (
                               <Check className="w-4 h-4 text-green-600" />
@@ -204,7 +209,7 @@ export function GroupInviteLinksDialog({ open, onOpenChange, chatId }: GroupInvi
                             variant="ghost"
                             onClick={() => handleRevokeLink(link.token)}
                             className="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
-                            title="Revoke link"
+                            title={t("invite.revokeLink")}
                           >
                             <Trash2 className="w-4 h-4" />
                           </Button>
@@ -216,7 +221,7 @@ export function GroupInviteLinksDialog({ open, onOpenChange, chatId }: GroupInvi
             </div>
           ) : (
             <div className="text-center text-sm text-muted-foreground py-8">
-              No invite links yet. Create one to invite people to this group.
+              {t("invite.empty")}
             </div>
           )}
         </div>

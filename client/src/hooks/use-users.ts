@@ -21,7 +21,7 @@ export function useSearchUsers(query: string) {
 export function useUpdateProfile() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (updates: { username?: string; firstName?: string; lastName?: string; bio?: string | null; birthday?: string | null; profileImageUrl?: string | null; theme?: string; colorTheme?: string; fontType?: string; textSize?: string }) => {
+    mutationFn: async (updates: { username?: string; firstName?: string; lastName?: string; bio?: string | null; birthday?: string | null; profileImageUrl?: string | null; theme?: string; language?: 'en' | 'uk' | 'es' | 'de'; colorTheme?: string; fontType?: string; textSize?: string }) => {
       const res = await fetch(api.users.updateProfile.path, {
         method: api.users.updateProfile.method,
         headers: { "Content-Type": "application/json" },

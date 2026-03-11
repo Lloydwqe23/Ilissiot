@@ -8,6 +8,8 @@ import { useCreateDirectChat, useCreateGroupChat } from "@/hooks/use-chats";
 import { useToast } from "@/hooks/use-toast";
 import { Search, Loader2, UserPlus, MessageSquarePlus, Users, X, Check, ArrowLeft, ArrowRight } from "lucide-react";
 import { useLocation } from "wouter";
+import { useAuth } from "@/hooks/use-auth";
+import { resolveLanguage, translate } from "@/lib/i18n";
 
 // Reusable debounce hook
 function useDebounceValue<T>(value: T, delay: number): T {
@@ -20,6 +22,9 @@ function useDebounceValue<T>(value: T, delay: number): T {
 }
 
 export function UserSearch({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+  const { user } = useAuth();
+  const language = resolveLanguage(user?.language);
+  const t = (key: string) => translate(language, key);
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebounceValue(query, 300);
   const { data: users, isLoading } = useSearchUsers(debouncedQuery);
@@ -50,7 +55,7 @@ export function UserSearch({ open, onOpenChange }: { open: boolean; onOpenChange
         setLocation(`/chat/${chat.id}`);
       },
       onError: (err) => {
-        toast({ title: "Couldn't start chat", description: err.message, variant: "destructive" });
+        toast({ title: t("usersearch.couldNotStartChat"), description: err.message, variant: "destructive" });
       }
     });
   };
@@ -74,7 +79,7 @@ export function UserSearch({ open, onOpenChange }: { open: boolean; onOpenChange
           setLocation(`/chat/${chat.id}`);
         },
         onError: (err) => {
-          toast({ title: "Couldn't create group", description: err.message, variant: "destructive" });
+          toast({ title: t("usersearch.couldNotCreateGroup"), description: err.message, variant: "destructive" });
         }
       }
     );
@@ -90,14 +95,14 @@ export function UserSearch({ open, onOpenChange }: { open: boolean; onOpenChange
               <button onClick={() => setMode('group-select')} className="hover:bg-muted rounded-full p-1 -ml-1 transition-colors">
                 <ArrowLeft className="w-5 h-5" />
               </button>
-              New Group
+              {t("usersearch.newGroup")}
             </DialogTitle>
           </DialogHeader>
 
           <div className="px-6 pb-4">
             <Input
               autoFocus
-              placeholder="Group name..."
+              placeholder={t("usersearch.groupNamePlaceholder")}
               value={groupName}
               onChange={(e) => setGroupName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && groupName.trim()) handleCreateGroup(); }}
@@ -106,7 +111,7 @@ export function UserSearch({ open, onOpenChange }: { open: boolean; onOpenChange
           </div>
 
           <div className="px-6 pb-2">
-            <p className="text-xs text-muted-foreground mb-2">{selectedUsers.length} member{selectedUsers.length !== 1 ? 's' : ''} selected</p>
+            <p className="text-xs text-muted-foreground mb-2">{selectedUsers.length} {t("usersearch.membersSelected")}</p>
             <div className="flex flex-wrap gap-2">
               {selectedUsers.map(u => (
                 <div key={u.id} className="flex items-center gap-1.5 bg-primary/10 text-primary rounded-full px-3 py-1 text-sm">
@@ -126,7 +131,7 @@ export function UserSearch({ open, onOpenChange }: { open: boolean; onOpenChange
               onClick={handleCreateGroup}
             >
               {createGroup.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Users className="w-4 h-4 mr-2" />}
-              Create Group
+              {t("usersearch.createGroup")}
             </Button>
           </div>
         </DialogContent>
@@ -144,12 +149,12 @@ export function UserSearch({ open, onOpenChange }: { open: boolean; onOpenChange
                 <button onClick={() => { setMode('direct'); setSelectedUsers([]); }} className="hover:bg-muted rounded-full p-1 -ml-1 transition-colors">
                   <ArrowLeft className="w-5 h-5" />
                 </button>
-                Add Members
+                {t("usersearch.addMembers")}
               </>
             ) : (
               <>
                 <MessageSquarePlus className="w-5 h-5 text-primary" />
-                Start New Chat
+                {t("usersearch.startNewChat")}
               </>
             )}
           </DialogTitle>
@@ -166,8 +171,8 @@ export function UserSearch({ open, onOpenChange }: { open: boolean; onOpenChange
                 <Users className="w-5 h-5 text-primary" />
               </div>
               <div className="flex-1">
-                <p className="font-medium group-hover:text-primary transition-colors">New Group</p>
-                <p className="text-xs text-muted-foreground">Create a group chat</p>
+                <p className="font-medium group-hover:text-primary transition-colors">{t("usersearch.newGroup")}</p>
+                <p className="text-xs text-muted-foreground">{t("usersearch.createGroupChat")}</p>
               </div>
             </button>
           </div>
@@ -192,7 +197,7 @@ export function UserSearch({ open, onOpenChange }: { open: boolean; onOpenChange
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input 
               autoFocus
-              placeholder="Search by username..." 
+              placeholder={t("usersearch.searchByUsername")} 
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               className="pl-9 rounded-xl bg-muted/50 border-transparent focus:bg-background focus:border-primary transition-all h-11"
@@ -204,16 +209,16 @@ export function UserSearch({ open, onOpenChange }: { open: boolean; onOpenChange
           {isLoading && query.length > 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
               <Loader2 className="w-6 h-6 animate-spin text-primary" />
-              <p className="text-sm">Searching users...</p>
+              <p className="text-sm">{t("usersearch.searchingUsers")}</p>
             </div>
           ) : query.length > 0 && users?.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-              <p>No users found matching "{query}"</p>
+              <p>{t("usersearch.noUsersFoundMatching")} "{query}"</p>
             </div>
           ) : !query ? (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground/60 gap-4">
               <UserPlus className="w-12 h-12 opacity-20" />
-              <p className="text-sm">Type a name to search</p>
+              <p className="text-sm">{t("usersearch.typeNameToSearch")}</p>
             </div>
           ) : (
             <div className="space-y-1 p-2">
@@ -266,7 +271,7 @@ export function UserSearch({ open, onOpenChange }: { open: boolean; onOpenChange
               className="w-full rounded-xl h-11"
               onClick={() => setMode('group-name')}
             >
-              <span>Next ({selectedUsers.length} selected)</span>
+              <span>{t("common.next")} ({selectedUsers.length} {t("usersearch.selected")})</span>
               <ArrowRight className="w-4 h-4 ml-2" />
             </Button>
           </div>

@@ -4,6 +4,8 @@ import { useVotePoll, useClosePoll } from "@/hooks/use-chats";
 import { Button } from "@/components/ui/button";
 import { type PollWithResults } from "@shared/schema";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useAuth } from "@/hooks/use-auth";
+import { resolveLanguage, translate } from "@/lib/i18n";
 
 interface PollMessageProps {
   poll: PollWithResults;
@@ -13,6 +15,9 @@ interface PollMessageProps {
 }
 
 export function PollMessage({ poll, currentUserId, isCreator, isAdmin }: PollMessageProps) {
+  const { user } = useAuth();
+  const language = resolveLanguage(user?.language);
+  const t = (key: string) => translate(language, key);
   const [selectedOptions, setSelectedOptions] = useState<number[]>(poll.userVotes || []);
   const [isChangingVote, setIsChangingVote] = useState(false);
   const votePoll = useVotePoll();
@@ -62,25 +67,25 @@ export function PollMessage({ poll, currentUserId, isCreator, isAdmin }: PollMes
             {poll.isAnonymous && (
               <span className="flex items-center gap-1">
                 <Lock className="w-3 h-3" />
-                Anonymous
+                {t("poll.anonymousVoting")}
               </span>
             )}
             {poll.allowMultipleAnswers && (
               <span className="flex items-center gap-1">
                 <CheckCircle2 className="w-3 h-3" />
-                Multiple answers
+                {t("poll.allowMultiple")}
               </span>
             )}
             {isClosed && (
               <span className="flex items-center gap-1 text-destructive">
                 <XCircle className="w-3 h-3" />
-                Closed
+                {t("poll.closed")}
               </span>
             )}
             {poll.closesAt && !isClosed && (
               <span className="flex items-center gap-1">
                 <Clock className="w-3 h-3" />
-                Closes {new Date(poll.closesAt).toLocaleDateString()}
+                {t("poll.closes")} {new Date(poll.closesAt).toLocaleDateString()}
               </span>
             )}
           </div>
@@ -197,7 +202,7 @@ export function PollMessage({ poll, currentUserId, isCreator, isAdmin }: PollMes
       <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-t border-border/40 bg-muted/20 dark:bg-zinc-900">
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
           <Users className="w-3 h-3" />
-          <span>{poll.totalVotes} {poll.totalVotes === 1 ? 'vote' : 'votes'}</span>
+          <span>{poll.totalVotes} {poll.totalVotes === 1 ? t("poll.vote") : t("poll.votes")}</span>
         </div>
 
         <div className="flex items-center gap-2">
@@ -208,7 +213,7 @@ export function PollMessage({ poll, currentUserId, isCreator, isAdmin }: PollMes
               onClick={() => { setIsChangingVote(true); setSelectedOptions(poll.userVotes || []); }}
               className="h-7 text-xs px-3"
             >
-              Change vote
+              {t("poll.changeVote")}
             </Button>
           )}
 
@@ -219,7 +224,7 @@ export function PollMessage({ poll, currentUserId, isCreator, isAdmin }: PollMes
               disabled={votePoll.isPending}
               className="h-7 text-xs px-3"
             >
-              {votePoll.isPending ? 'Voting…' : 'Vote'}
+              {votePoll.isPending ? t("poll.voting") : t("poll.voteNow")}
             </Button>
           )}
 
@@ -231,7 +236,7 @@ export function PollMessage({ poll, currentUserId, isCreator, isAdmin }: PollMes
               disabled={closePoll.isPending}
               className="h-7 text-xs px-3"
             >
-              Close Poll
+              {t("poll.closePoll")}
             </Button>
           )}
         </div>

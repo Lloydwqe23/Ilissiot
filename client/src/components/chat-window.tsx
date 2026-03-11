@@ -29,6 +29,7 @@ import { getChatBackground, setChatBackground, findBackground, getCustomBackgrou
 import { formatMessageContent } from "@/lib/format-message";
 import { useChatMuted, setChatMute, getMuteLabel, muteFor } from "@/lib/chat-mute";
 import { useLocation } from "wouter";
+import { resolveLanguage, translate } from "@/lib/i18n";
 
 /** Audio message component with custom waveform player */
 function VideoMessage({ url, name, isMine }: { url: string; name: string; isMine: boolean }) {
@@ -474,6 +475,7 @@ function GroupInfoDialog({
   leaveGroup,
   onLeave,
   onJumpToMessage,
+  t,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -486,6 +488,7 @@ function GroupInfoDialog({
   leaveGroup: any;
   onLeave: () => void;
   onJumpToMessage?: (messageId: number) => void;
+  t: (key: string) => string;
 }) {
   const [addMode, setAddMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -719,16 +722,16 @@ function GroupInfoDialog({
                 <div
                   className={`flex items-center gap-1.5 text-left ${canEditInfo ? 'group/name hover:opacity-80 transition-opacity cursor-pointer' : ''}`}
                   onClick={() => { if (canEditInfo) { setNameValue(chat.name || ''); setEditingName(true); } }}
-                  title={canEditInfo ? 'Click to rename' : undefined}
+                  title={canEditInfo ? t('group.clickToRename') : undefined}
                 >
-                  <span className="text-lg font-semibold truncate">{chat.name || 'Group'}</span>
+                  <span className="text-lg font-semibold truncate">{chat.name || t('group.defaultName')}</span>
                   {canEditInfo && <Pencil className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover/name:opacity-100 transition-opacity shrink-0" />}
                 </div>
               )}
-              <p className="text-sm text-muted-foreground font-normal">{chat.members?.length || 0} members</p>
+              <p className="text-sm text-muted-foreground font-normal">{chat.members?.length || 0} {t('chat.members').toLowerCase()}</p>
             </div>
           </DialogTitle>
-          <DialogDescription className="sr-only">Group chat information and member management</DialogDescription>
+          <DialogDescription className="sr-only">{t('chat.groupInfoDescription')}</DialogDescription>
           
           {/* Tabs */}
           <div className="flex gap-1 mt-4 border-b border-border overflow-x-auto">
@@ -740,7 +743,7 @@ function GroupInfoDialog({
                   : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
             >
-              Members ({chat.members?.length || 0})
+              {t('chat.members')} ({chat.members?.length || 0})
             </button>
             <button
               onClick={() => setActiveTab('voice-video')}
@@ -750,7 +753,7 @@ function GroupInfoDialog({
                   : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
             >
-              Voice & Video ({mediaData.audioVideo.length})
+              {t('group.voiceVideo')} ({mediaData.audioVideo.length})
             </button>
             <button
               onClick={() => setActiveTab('media')}
@@ -760,7 +763,7 @@ function GroupInfoDialog({
                   : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
             >
-              Media ({mediaData.media.length})
+              {t('group.media')} ({mediaData.media.length})
             </button>
             <button
               onClick={() => setActiveTab('documents')}
@@ -770,7 +773,7 @@ function GroupInfoDialog({
                   : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
             >
-              Documents ({mediaData.documents.length})
+              {t('group.documents')} ({mediaData.documents.length})
             </button>
           </div>
         </DialogHeader>
@@ -782,18 +785,18 @@ function GroupInfoDialog({
           <div className="flex flex-col gap-3 flex-1 overflow-hidden">
             <div className="flex items-center gap-2">
               <Input
-                placeholder="Search users to add..."
+                placeholder={t('group.searchUsersToAdd')}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 autoFocus
               />
               <Button variant="ghost" size="sm" onClick={() => { setAddMode(false); setSearchQuery(''); }}>
-                Cancel
+                {t('common.cancel')}
               </Button>
             </div>
             <div className="overflow-y-auto flex-1 space-y-1">
               {filteredResults.length === 0 && searchQuery.trim() && (
-                <p className="text-sm text-muted-foreground text-center py-4">No users found</p>
+                <p className="text-sm text-muted-foreground text-center py-4">{t('chat.noUsersFound')}</p>
               )}
               {filteredResults.map((u: any) => (
                 <button
@@ -821,10 +824,10 @@ function GroupInfoDialog({
           /* Member List */
           <div className="flex flex-col gap-2 flex-1 overflow-hidden">
             <div className="flex items-center justify-between px-1">
-              <span className="text-sm font-medium text-muted-foreground">Members</span>
+              <span className="text-sm font-medium text-muted-foreground">{t('chat.members')}</span>
               <Button variant="ghost" size="sm" className="text-primary gap-1" onClick={() => setAddMode(true)}>
                 <UserPlus className="w-4 h-4" />
-                Add
+                {t('group.add')}
               </Button>
             </div>
             <div className="overflow-y-auto flex-1 space-y-1">
@@ -838,7 +841,7 @@ function GroupInfoDialog({
                 })();
                 return chat.members?.map((m: any) => {
                 const memberUser = m.user;
-                const memberName = [memberUser?.firstName, memberUser?.lastName].filter(Boolean).join(' ') || memberUser?.email || 'Unknown';
+                const memberName = [memberUser?.firstName, memberUser?.lastName].filter(Boolean).join(' ') || memberUser?.email || t('profile.unknown');
                 const isSelf = m.userId === currentUserId;
                 const memberIsAdmin = m.role === 'admin';
                 const isCreator = effectiveCreatorId && m.userId === effectiveCreatorId;
@@ -853,16 +856,16 @@ function GroupInfoDialog({
                       <AvatarFallback className="text-xs bg-primary/10 text-primary">{memberName[0]}</AvatarFallback>
                     </Avatar>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{memberName}{isSelf ? ' (You)' : ''}</p>
+                      <p className="text-sm font-medium truncate">{memberName}{isSelf ? ` (${t('chat.youLabel')})` : ''}</p>
                       <div className="flex items-center gap-1.5 flex-wrap">
                         {isCreator && (
                           <span className="text-[11px] text-amber-500 flex items-center gap-0.5 font-semibold">
-                            <Crown className="w-3 h-3" /> Creator
+                            <Crown className="w-3 h-3" /> {t('group.creator')}
                           </span>
                         )}
                         {memberIsAdmin && !isCreator && (
                           <span className="text-[11px] text-primary flex items-center gap-0.5">
-                            <Crown className="w-3 h-3" /> Admin
+                            <Crown className="w-3 h-3" /> {t('group.admin')}
                           </span>
                         )}
                         {m.title && (
@@ -879,7 +882,7 @@ function GroupInfoDialog({
                           size="icon"
                           className="w-7 h-7 text-muted-foreground hover:text-primary"
                           onClick={() => setSettingsMember(m)}
-                          title="Member settings"
+                          title={t('group.memberSettings')}
                         >
                           <Shield className="w-4 h-4" />
                         </Button>
@@ -888,7 +891,7 @@ function GroupInfoDialog({
                           size="icon"
                           className="w-7 h-7 text-muted-foreground hover:text-destructive"
                           onClick={() => {
-                            if (confirm(`Remove ${memberName} from the group?`)) {
+                            if (confirm(`${t('group.removeFromGroup')} ${memberName}?`)) {
                               removeGroupMember.mutate({ chatId: chat.id, userId: m.userId });
                             }
                           }}
@@ -903,7 +906,7 @@ function GroupInfoDialog({
                         size="icon"
                         className="w-7 h-7 text-muted-foreground hover:text-primary shrink-0"
                         onClick={() => setSettingsMember(m)}
-                        title="View your permissions"
+                        title={t('group.viewYourPermissions')}
                       >
                         <Shield className="w-4 h-4" />
                       </Button>
@@ -919,14 +922,14 @@ function GroupInfoDialog({
               variant="destructive"
               className="w-full mt-2"
               onClick={() => {
-                if (confirm('Leave this group? You will no longer receive messages.')) {
+                if (confirm(t('group.leaveConfirm'))) {
                   leaveGroup.mutate(chat.id, {
                     onSuccess: () => { onOpenChange(false); onLeave(); }
                   });
                 }
               }}
             >
-              Leave Group
+              {t('group.leaveGroup')}
             </Button>
           </div>
         )}
@@ -940,7 +943,7 @@ function GroupInfoDialog({
               {mediaData.audioVideo.length === 0 ? (
                 <div className="text-center py-12 text-muted-foreground">
                   <Mic className="w-12 h-12 mx-auto mb-2 opacity-20" />
-                  <p>No voice or video messages yet</p>
+                  <p>{t('chat.noVoiceVideoYet')}</p>
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -948,7 +951,7 @@ function GroupInfoDialog({
                     const isAudio = item.name?.startsWith("audio-");
                     const isScreen = item.name?.startsWith("screen-");
                     const Icon = isAudio ? Mic : isScreen ? ScreenShare : Video;
-                    const label = isAudio ? "Audio Message" : isScreen ? "Screen Recording" : "Video Message";
+                    const label = isAudio ? t('group.audioMessage') : isScreen ? t('group.screenRecording') : t('group.videoMessage');
                     const isPlaying = playingId === item.id;
                     const time = currentTime[item.id] || 0;
                     const dur = duration[item.id] || 0;
@@ -1045,7 +1048,7 @@ function GroupInfoDialog({
               {mediaData.media.length === 0 ? (
                 <div className="text-center py-12 text-muted-foreground">
                   <FileIcon className="w-12 h-12 mx-auto mb-2 opacity-20" />
-                  <p>No media shared yet</p>
+                  <p>{t('chat.noMediaYet')}</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-3 gap-2">
@@ -1071,7 +1074,7 @@ function GroupInfoDialog({
                         ) : (
                           <img
                             src={item.url}
-                            alt="Media"
+                            alt={t('group.media')}
                             className="w-full h-full object-cover"
                           />
                         )}
@@ -1091,7 +1094,7 @@ function GroupInfoDialog({
               {mediaData.documents.length === 0 ? (
                 <div className="text-center py-12 text-muted-foreground">
                   <FileText className="w-12 h-12 mx-auto mb-2 opacity-20" />
-                  <p>No documents shared yet</p>
+                  <p>{t('chat.noDocumentsYet')}</p>
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -1164,6 +1167,8 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   type ScreenRecordingOptions = { includeMicrophone: boolean; includeCamera: boolean };
 
   const { user } = useAuth();
+  const language = resolveLanguage(user?.language);
+  const t = (key: string) => translate(language, key);
   const { isMobile } = useSidebar();
   const [, navigate] = useLocation();
   const { data: chat, isLoading: chatLoading } = useChat(chatId);
@@ -2466,7 +2471,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   if (!chat) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center bg-background/50 text-muted-foreground">
-        <p>Chat not found</p>
+        <p>{t("chat.notFound")}</p>
       </div>
     );
   }
@@ -2496,7 +2501,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
               <Button variant="ghost" size="icon" className="rounded-full h-9 w-9" onClick={cancelSelection}>
                 <X className="w-5 h-5" />
               </Button>
-              <span className="font-semibold text-[15px]">{selectedMessages.size} selected</span>
+              <span className="font-semibold text-[15px]">{selectedMessages.size} {t("message.selectedCount")}</span>
             </div>
             <div className="flex items-center gap-2">
               {selectedMessages.size === 1 && (() => {
@@ -2511,7 +2516,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                   className="flex items-center gap-2"
                 >
                   <Pencil className="w-4 h-4" />
-                  Edit
+                  {t("message.edit")}
                 </Button>
               )}
               <Button
@@ -2522,7 +2527,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                 className="flex items-center gap-2"
               >
                 {deleteMessages.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                Delete
+                {t("chat.context.delete")}
               </Button>
             </div>
           </>
@@ -2571,7 +2576,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                         <span className="w-[3px] h-[3px] rounded-full bg-primary animate-typing-dot-3" />
                       </span>
                     </span>
-                  ) : (chat.isGroup ? `${chat.members.length} members` : statusText)}
+                  ) : (chat.isGroup ? `${chat.members.length} ${t('chat.members').toLowerCase()}` : statusText)}
                 </span>
               </div>
             </div>
@@ -2595,7 +2600,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                       [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.email || 'Unknown',
                       user?.profileImageUrl
                     )}
-                    title="Voice call"
+                    title={t('chat.voiceCall')}
                   >
                     <Phone className="w-5 h-5" />
                   </Button>
@@ -2614,7 +2619,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                       [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.email || 'Unknown',
                       user?.profileImageUrl
                     )}
-                    title="Video call"
+                    title={t('chat.videoCall')}
                   >
                     <Video className="w-5 h-5" />
                   </Button>
@@ -2637,7 +2642,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                 size="icon"
                 className="text-muted-foreground rounded-full h-9 w-9 hover:text-primary"
                 onClick={() => setIsSearching(!isSearching)}
-                title="Search messages"
+                title={t('chat.searchMessages')}
               >
                 <Search className="w-5 h-5" />
               </Button>
@@ -2649,18 +2654,18 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuLabel>Chat Options</DropdownMenuLabel>
+                  <DropdownMenuLabel>{t("chat.options")}</DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   {chat?.isGroup && (
                     <>
                       <DropdownMenuItem onClick={() => setCreatePollOpen(true)}>
                         <BarChart3 className="w-4 h-4 mr-2" />
-                        Create Poll
+                        {t('chat.createPoll')}
                       </DropdownMenuItem>
                       {chat?.members.find(m => m.userId === user?.id)?.role === 'admin' && (
                         <DropdownMenuItem onClick={() => setInviteLinksOpen(true)}>
                           <Link2 className="w-4 h-4 mr-2" />
-                          Invite Links
+                          {t('chat.inviteLinks')}
                         </DropdownMenuItem>
                       )}
                       <DropdownMenuSeparator />
@@ -2668,61 +2673,61 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                   )}
                   <DropdownMenuItem onClick={() => setBgPickerOpen(true)}>
                     <Paintbrush className="w-4 h-4 mr-2" />
-                    Change Background
+                    {t('chat.changeBackground')}
                   </DropdownMenuItem>
                   <DropdownMenuSub>
                     <DropdownMenuSubTrigger>
                       {chatMuted ? (
-                        <><BellOff className="w-4 h-4 mr-2" /> Muted</>  
+                        <><BellOff className="w-4 h-4 mr-2" /> {t("chat.muted")}</>  
                       ) : (
-                        <><Bell className="w-4 h-4 mr-2" /> Notifications</>  
+                        <><Bell className="w-4 h-4 mr-2" /> {t("chat.notifications")}</>  
                       )}
                     </DropdownMenuSubTrigger>
                     <DropdownMenuSubContent>
                       {chatMuted ? (
                         <DropdownMenuItem onClick={() => setChatMute(chatId, null)}>
                           <Bell className="w-4 h-4 mr-2" />
-                          Unmute
+                          {t('chat.context.unmute')}
                         </DropdownMenuItem>
                       ) : (
                         <>
-                          <DropdownMenuLabel className="text-xs">Mute for…</DropdownMenuLabel>
+                          <DropdownMenuLabel className="text-xs">{t("chat.muteFor")}</DropdownMenuLabel>
                           <DropdownMenuItem onClick={() => { setChatMute(chatId, muteFor(1)); }}>
-                            1 hour
+                            {t('chat.context.muteHour')}
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => { setChatMute(chatId, muteFor(8)); }}>
-                            8 hours
+                            {t('chat.context.mute8Hours')}
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => { setChatMute(chatId, muteFor(24)); }}>
-                            1 day
+                            {t('chat.context.muteDay')}
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => { setChatMute(chatId, muteFor(24 * 7)); }}>
-                            1 week
+                            {t('chat.context.muteWeek')}
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem onClick={() => { setChatMute(chatId, "forever"); }}>
                             <BellOff className="w-4 h-4 mr-2" />
-                            Mute forever
+                            {t('chat.context.muteForever')}
                           </DropdownMenuItem>
                         </>
                       )}
                     </DropdownMenuSubContent>
                   </DropdownMenuSub>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => handleClearHistoryForMe()}>Clear history for me</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleClearHistoryForAll()}>Clear history for everyone</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleClearHistoryForMe()}>{t("chat.clearHistoryMe")}</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleClearHistoryForAll()}>{t("chat.clearHistoryAll")}</DropdownMenuItem>
                   <DropdownMenuSeparator />
                   {!chat?.isGroup && otherMember && (
                     <DropdownMenuItem
                       onClick={() => { blockStatus?.blocked ? handleUnblockUser() : handleBlockUser(); }}
                       className={blockStatus?.blocked ? undefined : 'text-destructive'}
                     >
-                      {blockStatus?.blocked ? 'Unblock user' : 'Block user'}
+                      {blockStatus?.blocked ? t('chat.context.unblockUser') : t('chat.context.blockUser')}
                     </DropdownMenuItem>
                   )}
                   {chat?.isGroup && (
                     <DropdownMenuItem onClick={handleLeaveGroup} className="text-destructive">
-                      Leave group
+                      {t('chat.context.leaveGroup')}
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuSeparator />
@@ -2736,13 +2741,13 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                     return effectiveCreator === user?.id ? (
                       <DropdownMenuItem onClick={() => setDeleteGroupConfirmOpen(true)} className="text-destructive">
                         <Trash2 className="w-4 h-4 mr-2" />
-                        Delete group
+                        {t('chat.deleteGroup')}
                       </DropdownMenuItem>
                     ) : null;
                   })() : (
                     <DropdownMenuItem onClick={() => handleDeleteChat()} className="text-destructive">
                       <Trash2 className="w-4 h-4 mr-2" />
-                      Delete chat
+                      {t('chat.context.delete')}
                     </DropdownMenuItem>
                   )}
                 </DropdownMenuContent>
@@ -2802,7 +2807,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
             </>
           )}
           {allMatches.length === 0 && searchQuery.trim() && (
-            <span className="text-xs text-muted-foreground">No matches</span>
+            <span className="text-xs text-muted-foreground">{t("chat.noMatches")}</span>
           )}
           <Button
             variant="ghost"
@@ -2828,8 +2833,8 @@ export function ChatWindow({ chatId }: { chatId: number }) {
       >
         {messages?.length === 0 ? (
           <div className="m-auto text-center p-6 bg-card rounded-2xl shadow-sm border border-border/50 max-w-sm">
-            <h3 className="font-semibold mb-1">Say Hello! 👋</h3>
-            <p className="text-sm text-muted-foreground">Send a message to start the conversation.</p>
+            <h3 className="font-semibold mb-1">{t("chat.sayHello")}</h3>
+            <p className="text-sm text-muted-foreground">{t("chat.startConversationMessage")}</p>
           </div>
         ) : (
           <div className="mt-auto flex flex-col gap-3">
@@ -3006,7 +3011,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                                 ${isMine ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}
                             >
                               <Share2 className="w-3 h-3" />
-                              <span>Forwarded from <span className="font-semibold not-italic">{forwardAttachment.name}</span></span>
+                              <span>{t("chat.forwardedFrom")} <span className="font-semibold not-italic">{forwardAttachment.name}</span></span>
                             </div>
                           );
                         } catch { return null; }
@@ -3049,7 +3054,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                           : isMine ? 'text-primary-foreground/70' : 'text-muted-foreground'
                       }`}>
                         {msg.isEdited && (
-                          <span className="text-[10px] italic mr-1">edited</span>
+                          <span className="text-[10px] italic mr-1">{t("chat.edited")}</span>
                         )}
                         <span className="text-[10px] uppercase font-medium tracking-wider">
                           {new Date(msg.createdAt!).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })}
@@ -3133,7 +3138,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                         textareaRef.current?.focus();
                       }}>
                         <Reply className="w-4 h-4 mr-2" />
-                        Reply
+                        {t("message.reply")}
                       </ContextMenuItem>
                       <ContextMenuItem onClick={() => {
                         const senderName = isMine
@@ -3149,27 +3154,27 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                         setForwardDialogOpen(true);
                       }}>
                         <Share2 className="w-4 h-4 mr-2" />
-                        Forward
+                        {t("message.forward")}
                       </ContextMenuItem>
                       <ContextMenuItem onClick={() => {
                         pinMessage.mutate({ chatId, messageId: msg.id });
                       }}>
                         <Pin className="w-4 h-4 mr-2" />
-                        Pin Message
+                        {t("message.pin")}
                       </ContextMenuItem>
                       <ContextMenuItem onClick={() => {
                         if (!selectionMode) setSelectionMode(true);
                         toggleMessageSelection(msg.id);
                       }}>
                         <CheckCircle2 className="w-4 h-4 mr-2" />
-                        Select
+                        {t("message.select")}
                       </ContextMenuItem>
                         <>
                           <ContextMenuSeparator />
                           <ContextMenuSub>
                             <ContextMenuSubTrigger>
                               <Smile className="w-4 h-4 mr-2" />
-                              React
+                              {t("message.react")}
                             </ContextMenuSubTrigger>
                             <ContextMenuSubContent className="p-0 w-64">
                               <div className="flex flex-col">
@@ -3233,12 +3238,12 @@ export function ChatWindow({ chatId }: { chatId: number }) {
         {blockStatus?.blockedBy ? (
           <div className="max-w-4xl mx-auto flex items-center justify-center gap-2 py-3 text-muted-foreground">
             <Ban className="w-5 h-5 text-destructive/70" />
-            <span className="text-sm">You have been blocked by this user.</span>
+            <span className="text-sm">{t("chat.blockedByUser")}</span>
           </div>
         ) : blockStatus?.blocked ? (
           <div className="max-w-4xl mx-auto flex items-center justify-center gap-2 py-3 text-muted-foreground">
             <Ban className="w-5 h-5 text-destructive/70" />
-            <span className="text-sm">You blocked this user. Unblock to send messages.</span>
+            <span className="text-sm">{t("chat.youBlockedUser")}</span>
           </div>
         ) : (
         <form onSubmit={handleSend} className="max-w-4xl mx-auto space-y-2">
@@ -3266,7 +3271,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
             <div className="flex items-center justify-between bg-muted/50 border border-border/50 rounded-lg p-2 px-3">
               <div className="flex items-center gap-2">
                 <Pencil className="w-4 h-4 text-primary" />
-                <span className="text-sm font-medium">Editing message</span>
+                <span className="text-sm font-medium">{t("chat.editingMessage")}</span>
               </div>
               <button
                 type="button"
@@ -3315,7 +3320,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
                   if (e.key === 'Escape' && editingMessageId) { e.preventDefault(); cancelEditingMessage(); }
                 }}
-                placeholder="Write a message..."
+                placeholder={t('chat.writeMessage')}
                 className="w-full max-h-32 min-h-[44px] bg-transparent resize-none border-0 outline-none focus:ring-0 focus:outline-none text-[15px] py-2.5 px-3 scrollbar-hide"
                 rows={1}
               />
@@ -3497,7 +3502,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-52">
-                    <DropdownMenuLabel>Record message</DropdownMenuLabel>
+                    <DropdownMenuLabel>{t("chat.recordMessage")}</DropdownMenuLabel>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => startRecording('audio')} className="gap-2">
                       <Mic className="w-4 h-4" />
@@ -3559,7 +3564,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
               size="icon"
               disabled={editingMessageId ? !inputValue.trim() || editMessage.isPending : (!inputValue.trim() && attachments.length === 0) || sendMessage.isPending}
               className="h-12 w-12 rounded-full shrink-0 bg-primary text-primary-foreground shadow-md shadow-primary/20 hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:transform-none"
-              title={editingMessageId ? "Save changes" : "Send message"}
+              title={editingMessageId ? t('common.saveChanges') : t('chat.sendMessage')}
             >
               {editingMessageId ? (
                 editMessage.isPending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Check className="w-5 h-5" />
@@ -3586,11 +3591,13 @@ export function ChatWindow({ chatId }: { chatId: number }) {
       }}>
         <DialogContent className="sm:max-w-md" aria-describedby="delete-dialog-description">
           <DialogHeader>
-            <DialogTitle>Delete {pendingDeleteItems.length} message{pendingDeleteItems.length !== 1 ? 's' : ''}?</DialogTitle>
+            <DialogTitle>
+              {t("message.delete")} {pendingDeleteItems.length} {pendingDeleteItems.length !== 1 ? t("message.messages") : t("message.message")}?
+            </DialogTitle>
             <DialogDescription id="delete-dialog-description">
               {hasOwnInDelete
-                ? "Choose how you want to delete the selected message(s)."
-                : "You can only delete other people's messages for yourself."}
+                ? t("message.deleteOptions")
+                : t("message.deleteOnlyForMe")}
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-2 mt-2">
@@ -3601,7 +3608,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                 className="w-full"
               >
                 <Trash2 className="w-4 h-4 mr-2" />
-                Delete for everyone
+                {t("message.deleteForEveryone")}
               </Button>
             )}
             <Button
@@ -3610,14 +3617,14 @@ export function ChatWindow({ chatId }: { chatId: number }) {
               className="w-full"
             >
               <Trash2 className="w-4 h-4 mr-2" />
-              Delete for me
+              {t("message.deleteForMe")}
             </Button>
             <Button
               variant="ghost"
               onClick={() => { setDeleteDialogOpen(false); setPendingDeleteItems([]); }}
               className="w-full"
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
           </div>
         </DialogContent>
@@ -3633,7 +3640,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
       }}>
         <DialogContent className="sm:max-w-md" aria-describedby="forward-dialog-description">
           <DialogHeader>
-            <DialogTitle>Forward message</DialogTitle>
+            <DialogTitle>{t("chat.forwardMessage")}</DialogTitle>
             <DialogDescription id="forward-dialog-description">
               Choose a chat to forward this message to.
             </DialogDescription>
@@ -3726,7 +3733,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                 );
               })}
             {allChats && allChats.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-4">No chats found</p>
+              <p className="text-sm text-muted-foreground text-center py-4">{t("chat.noChatsFound")}</p>
             )}
           </div>
         </DialogContent>
@@ -3894,9 +3901,9 @@ export function ChatWindow({ chatId }: { chatId: number }) {
               }}
             >
               <Download className="w-4 h-4 mr-2" />
-              Download
+              {t('common.download')}
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => { setImagePreview(null); resetZoom(); }}>Close</Button>
+            <Button variant="ghost" size="sm" onClick={() => { setImagePreview(null); resetZoom(); }}>{t("common.close")}</Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -3952,6 +3959,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
           leaveGroup={leaveGroup}
           onLeave={() => navigate('/')}
           onJumpToMessage={jumpToMessage}
+          t={t}
         />
       )}
 
@@ -4000,18 +4008,18 @@ export function ChatWindow({ chatId }: { chatId: number }) {
       <Dialog open={deleteGroupConfirmOpen} onOpenChange={setDeleteGroupConfirmOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Delete Group</DialogTitle>
+            <DialogTitle>{t("chat.deleteGroup")}</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete this group? All messages, members, and group data will be permanently removed. This action cannot be undone.
+              {t('chat.deleteGroupConfirm')}
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2 pt-4">
             <Button variant="outline" onClick={() => setDeleteGroupConfirmOpen(false)}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button variant="destructive" onClick={handleDeleteGroup}>
               <Trash2 className="w-4 h-4 mr-2" />
-              Delete Group
+              {t('chat.deleteGroup')}
             </Button>
           </div>
         </DialogContent>

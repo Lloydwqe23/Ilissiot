@@ -6,6 +6,8 @@ import { Phone, Video, MessageCircle, Download, Play, Pause, Mic, ScreenShare, I
 import type { User } from "@shared/models/auth";
 import { useMessages } from "@/hooks/use-messages";
 import { useChats } from "@/hooks/use-chats";
+import { useAuth } from "@/hooks/use-auth";
+import { resolveLanguage, translate } from "@/lib/i18n";
 
 type VoiceVideoItem = {
   id: number;
@@ -17,6 +19,9 @@ type VoiceVideoItem = {
 };
 
 function VoiceVideoTab({ items, onJumpToMessage }: { items: VoiceVideoItem[]; onJumpToMessage?: (messageId: number) => void }) {
+  const { user } = useAuth();
+  const language = resolveLanguage(user?.language);
+  const t = (key: string) => translate(language, key);
   const [playingId, setPlayingId] = useState<number | null>(null);
   const [currentTime, setCurrentTime] = useState<Record<number, number>>({});
   const [duration, setDuration] = useState<Record<number, number>>({});
@@ -80,7 +85,7 @@ function VoiceVideoTab({ items, onJumpToMessage }: { items: VoiceVideoItem[]; on
       <div className="p-6">
         <div className="text-center py-12 text-muted-foreground">
           <Mic className="w-12 h-12 mx-auto mb-2 opacity-20" />
-          <p>No voice or video messages yet</p>
+          <p>{t("chat.noVoiceVideoYet")}</p>
         </div>
       </div>
     );
@@ -93,7 +98,7 @@ function VoiceVideoTab({ items, onJumpToMessage }: { items: VoiceVideoItem[]; on
           const isAudio = item.name?.startsWith("audio-");
           const isScreen = item.name?.startsWith("screen-");
           const Icon = isAudio ? Mic : isScreen ? ScreenShare : Video;
-          const label = isAudio ? "Audio Message" : isScreen ? "Screen Recording" : "Video Message";
+          const label = isAudio ? t("group.audioMessage") : isScreen ? t("group.screenRecording") : t("group.videoMessage");
           const isPlaying = playingId === item.id;
           const time = currentTime[item.id] || 0;
           const dur = duration[item.id] || 0;
@@ -195,6 +200,9 @@ export function UserProfileModal({
   currentUserId?: string;
   onJumpToMessage?: (messageId: number) => void;
 }) {
+  const { user: currentUser } = useAuth();
+  const language = resolveLanguage(currentUser?.language);
+  const t = (key: string) => translate(language, key);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'general' | 'voice-video' | 'media' | 'documents'>('general');
   
@@ -228,8 +236,8 @@ export function UserProfileModal({
       if (!msg.attachments) return;
       
       const senderName = msg.sender 
-        ? [msg.sender.firstName, msg.sender.lastName].filter(Boolean).join(' ') || msg.sender.email || 'Unknown'
-        : 'Unknown';
+        ? [msg.sender.firstName, msg.sender.lastName].filter(Boolean).join(' ') || msg.sender.email || t("profile.unknown")
+        : t("profile.unknown");
       
       msg.attachments.forEach((att: any) => {
         const mimeType = att.type || '';
@@ -284,7 +292,7 @@ export function UserProfileModal({
   if (!user) return null;
 
   const initials = `${user.firstName?.[0] || ''}${user.lastName?.[0] || ''}`.toUpperCase() || 'U';
-  const displayName = [user.firstName, user.lastName].filter(Boolean).join(" ") || user.email || "Unknown";
+  const displayName = [user.firstName, user.lastName].filter(Boolean).join(" ") || user.email || t("profile.unknown");
   
   const formatBirthday = (birthday: string | undefined) => {
     if (!birthday) return null;
@@ -324,7 +332,7 @@ export function UserProfileModal({
                   : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
             >
-              General
+              {t("profile.tabGeneral")}
             </button>
             {directChatId && (
               <>
@@ -336,7 +344,7 @@ export function UserProfileModal({
                       : 'border-transparent text-muted-foreground hover:text-foreground'
                   }`}
                 >
-                  Voice & Video ({mediaData.audioVideo.length})
+                  {t("group.voiceVideo")} ({mediaData.audioVideo.length})
                 </button>
                 <button
                   onClick={() => setActiveTab('media')}
@@ -346,7 +354,7 @@ export function UserProfileModal({
                       : 'border-transparent text-muted-foreground hover:text-foreground'
                   }`}
                 >
-                  Media ({mediaData.media.length})
+                  {t("group.media")} ({mediaData.media.length})
                 </button>
                 <button
                   onClick={() => setActiveTab('documents')}
@@ -356,7 +364,7 @@ export function UserProfileModal({
                       : 'border-transparent text-muted-foreground hover:text-foreground'
                   }`}
                 >
-                  Documents ({mediaData.documents.length})
+                  {t("group.documents")} ({mediaData.documents.length})
                 </button>
               </>
             )}
@@ -369,7 +377,7 @@ export function UserProfileModal({
               {/* Bio */}
               {user.bio && (
                 <div>
-                  <h3 className="text-sm font-semibold text-muted-foreground mb-1">Bio</h3>
+                  <h3 className="text-sm font-semibold text-muted-foreground mb-1">{t("profile.bio")}</h3>
                   <p className="text-sm">{user.bio}</p>
                 </div>
               )}
@@ -377,21 +385,21 @@ export function UserProfileModal({
               {/* Birthday */}
               {user.birthday && (
                 <div>
-                  <h3 className="text-sm font-semibold text-muted-foreground mb-1">Birthday</h3>
+                  <h3 className="text-sm font-semibold text-muted-foreground mb-1">{t("profile.birthday")}</h3>
                   <p className="text-sm">{formatBirthday(user.birthday)}</p>
                 </div>
               )}
 
               {/* Status */}
               <div>
-                <h3 className="text-sm font-semibold text-muted-foreground mb-1">Status</h3>
+                <h3 className="text-sm font-semibold text-muted-foreground mb-1">{t("userprofile.status")}</h3>
                 <div className="flex items-center gap-2">
                   <div className={`w-2 h-2 rounded-full ${
                     user.status === 'online' ? 'bg-green-500' :
                     user.status === 'away' ? 'bg-yellow-500' :
                     'bg-gray-500'
                   }`} />
-                  <p className="text-sm capitalize">{user.status || 'offline'}</p>
+                  <p className="text-sm capitalize">{t(`userprofile.status.${user.status || 'offline'}`)}</p>
                 </div>
               </div>
 
@@ -408,7 +416,7 @@ export function UserProfileModal({
                       className="flex-1 rounded-lg"
                     >
                       <MessageCircle className="w-4 h-4 mr-2" />
-                      Message
+                      {t("userprofile.message")}
                     </Button>
                   )}
                   {onCall && (
@@ -422,7 +430,7 @@ export function UserProfileModal({
                         className="flex-1 rounded-lg"
                       >
                         <Phone className="w-4 h-4 mr-2" />
-                        Call
+                        {t("userprofile.call")}
                       </Button>
                       <Button 
                         onClick={() => {
@@ -433,7 +441,7 @@ export function UserProfileModal({
                         className="flex-1 rounded-lg"
                       >
                         <Video className="w-4 h-4 mr-2" />
-                        Video
+                        {t("chat.videoCall")}
                       </Button>
                     </>
                   )}
@@ -451,7 +459,7 @@ export function UserProfileModal({
               {mediaData.media.length === 0 ? (
                 <div className="text-center py-12 text-muted-foreground">
                   <ImageIcon className="w-12 h-12 mx-auto mb-2 opacity-20" />
-                  <p>No media shared yet</p>
+                  <p>{t("chat.noMediaYet")}</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-3 gap-2">
@@ -495,7 +503,7 @@ export function UserProfileModal({
               {mediaData.documents.length === 0 ? (
                 <div className="text-center py-12 text-muted-foreground">
                   <FileText className="w-12 h-12 mx-auto mb-2 opacity-20" />
-                  <p>No documents shared yet</p>
+                  <p>{t("chat.noDocumentsYet")}</p>
                 </div>
               ) : (
                 <div className="space-y-2">

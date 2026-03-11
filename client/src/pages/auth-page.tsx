@@ -5,9 +5,12 @@ import { Card } from "@/components/ui/card";
 import { Shield, Zap, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useState } from "react";
+import { resolveLanguage, translate } from "@/lib/i18n";
 
 export function AuthPage() {
   const [mode, setMode] = useState<"login" | "register">("login");
+  const language = resolveLanguage(localStorage.getItem("app.language"));
+  const t = (key: string) => translate(language, key);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -123,10 +126,10 @@ export function AuthPage() {
             className="space-y-6 max-w-lg"
           >
             <h2 className="text-4xl md:text-5xl font-display font-bold leading-tight text-white">
-              Connect securely.<br />Communicate freely.
+              {t("auth.brandHeadingLine1")}<br />{t("auth.brandHeadingLine2")}
             </h2>
             <p className="text-lg text-primary-foreground/80 leading-relaxed">
-              Experience lightning-fast messaging with modern encryption. Ilissiot is designed for those who value privacy without compromising on design.
+              {t("auth.brandDesc")}
             </p>
           </motion.div>
         </div>
@@ -135,15 +138,15 @@ export function AuthPage() {
           <div className="flex items-start gap-4">
             <Shield className="w-6 h-6 text-white/80 mt-1" />
             <div>
-              <h3 className="font-semibold text-white">Secure by default</h3>
-              <p className="text-sm text-primary-foreground/70 mt-1">Your conversations belong to you.</p>
+              <h3 className="font-semibold text-white">{t("auth.featureSecureTitle")}</h3>
+              <p className="text-sm text-primary-foreground/70 mt-1">{t("auth.featureSecureDesc")}</p>
             </div>
           </div>
           <div className="flex items-start gap-4">
             <Zap className="w-6 h-6 text-white/80 mt-1" />
             <div>
-              <h3 className="font-semibold text-white">Lightning fast</h3>
-              <p className="text-sm text-primary-foreground/70 mt-1">Real-time sync across all devices.</p>
+              <h3 className="font-semibold text-white">{t("auth.featureFastTitle")}</h3>
+              <p className="text-sm text-primary-foreground/70 mt-1">{t("auth.featureFastDesc")}</p>
             </div>
           </div>
         </div>
@@ -159,12 +162,12 @@ export function AuthPage() {
         >
           <div className="text-center space-y-2">
             <h2 className="text-3xl font-display font-bold tracking-tight text-foreground">
-              {mode === "login" ? "Welcome back" : "Join Ilissiot"}
+              {mode === "login" ? t("auth.welcomeBack") : t("auth.join")}
             </h2>
             <p className="text-muted-foreground">
               {mode === "login"
-                ? "Sign in to continue to your account"
-                : "Create an account to get started"}
+                ? t("auth.signInDesc")
+                : t("auth.createDesc")}
             </p>
           </div>
 
@@ -211,7 +214,7 @@ export function AuthPage() {
                   className="w-full h-11 text-base font-semibold rounded-lg"
                 >
                   {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                  Sign In
+                  {t("auth.signIn")}
                 </Button>
               </form>
             ) : (
@@ -316,7 +319,7 @@ export function AuthPage() {
                   className="w-full h-11 text-base font-semibold rounded-lg"
                 >
                   {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                  Create Account
+                  {t("auth.createAccount")}
                 </Button>
               </form>
             )}
@@ -327,10 +330,10 @@ export function AuthPage() {
               </div>
               <div className="relative flex justify-center text-sm">
                 <span className="px-2 bg-card text-muted-foreground">
-                  {mode === "login" ? "or " : ""}
+                  {mode === "login" ? `${t("common.or")} ` : ""}
                   {mode === "login" ? (
                     <>
-                      Don't have an account?{" "}
+                      {t("auth.noAccount")}{" "}
                       <button
                         type="button"
                         onClick={() => {
@@ -339,12 +342,12 @@ export function AuthPage() {
                         }}
                         className="text-primary font-semibold hover:underline"
                       >
-                        Sign up
+                        {t("auth.signUp")}
                       </button>
                     </>
                   ) : (
                     <>
-                      Already have an account?{" "}
+                      {t("auth.haveAccount")}{" "}
                       <button
                         type="button"
                         onClick={() => {
@@ -353,7 +356,7 @@ export function AuthPage() {
                         }}
                         className="text-primary font-semibold hover:underline"
                       >
-                        Sign in
+                        {t("auth.signInLower")}
                       </button>
                     </>
                   )}

@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useBlockedUsers, useUnblockUser } from "@/hooks/use-chats";
 import { Loader2, Camera, Trash2, X } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
+import { APP_LANGUAGES, getLanguageLabel, resolveLanguage, translate, type AppLanguage } from "@/lib/i18n";
 
 export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const { user } = useAuth();
@@ -35,9 +36,11 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
   const defaultTheme = user?.theme || 'light';
   const [theme, setTheme] = useState<string>(defaultTheme);
+  const [language, setLanguage] = useState<AppLanguage>(resolveLanguage(user?.language));
   const [colorTheme, setColorTheme] = useState<string>(user?.colorTheme || 'blue');
   const [fontType, setFontType] = useState<string>(user?.fontType || 'inter');
   const [textSize, setTextSize] = useState<string>(user?.textSize || 'normal');
+  const t = (key: string) => translate(language, key);
 
   // blocked users list view state
   const [view, setView] = useState<'profile' | 'blocked' | 'design'>('profile');
@@ -54,6 +57,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
       setBirthday(user.birthday || "");
       setProfileImageUrl(user.profileImageUrl || "");
       setTheme(user.theme || 'light');
+      setLanguage(resolveLanguage(user.language));
       setColorTheme(user.colorTheme || 'blue');
       setFontType(user.fontType || 'inter');
       setTextSize(user.textSize || 'normal');
@@ -66,13 +70,13 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
 
     // Validate it's an image
     if (!file.type.startsWith('image/')) {
-      toast({ title: "Please select an image file", variant: "destructive" });
+      toast({ title: t("profile.upload.selectImage"), variant: "destructive" });
       return;
     }
 
     // Validate size (5MB max for profile image)
     if (file.size > 5 * 1024 * 1024) {
-      toast({ title: "Image must be smaller than 5MB", variant: "destructive" });
+      toast({ title: t("profile.upload.sizeLimit"), variant: "destructive" });
       return;
     }
 
@@ -132,10 +136,10 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
 
       const data = await response.json();
       setProfileImageUrl(data.url);
-      toast({ title: "Image uploaded" });
+      toast({ title: t("profile.upload.success") });
     } catch (err) {
       console.error("Upload error:", err);
-      toast({ title: "Failed to upload image", variant: "destructive" });
+      toast({ title: t("profile.upload.failed"), variant: "destructive" });
     } finally {
       setUploadingImage(false);
       setCropImageSrc(null);
@@ -163,6 +167,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
       birthday: birthday || null,
       profileImageUrl: profileImageUrl || null,
       theme,
+      language,
       colorTheme,
       fontType,
       textSize,
@@ -189,11 +194,11 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
         document.documentElement.classList.remove(...textSizeClasses);
         document.documentElement.classList.add(`text-size-${textSize}`);
 
-        toast({ title: "Profile updated successfully" });
+        toast({ title: t("profile.updated") });
         onOpenChange(false);
       },
       onError: (err) => {
-        toast({ title: "Failed to update profile", description: err.message, variant: "destructive" });
+        toast({ title: t("profile.updateFailed"), description: err.message, variant: "destructive" });
       }
     });
   };
@@ -205,28 +210,28 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[425px] max-h-[90vh] rounded-2xl p-0 overflow-hidden border-border/50 shadow-2xl flex flex-col" aria-describedby={undefined}>
         <DialogHeader className="p-6 bg-muted/30 border-b border-border/50">
-          <DialogTitle className="text-2xl font-display">Profile Settings</DialogTitle>
+          <DialogTitle className="text-2xl font-display">{t("profile.title")}</DialogTitle>
           <div className="mt-2 flex space-x-4">
             <button
               type="button"
               className={`text-sm font-medium ${view === 'profile' ? 'text-foreground' : 'text-muted-foreground'}`}
               onClick={() => setView('profile')}
             >
-              General
+              {t("profile.tabGeneral")}
             </button>
             <button
               type="button"
               className={`text-sm font-medium ${view === 'design' ? 'text-foreground' : 'text-muted-foreground'}`}
               onClick={() => setView('design')}
             >
-              Design
+              {t("profile.tabDesign")}
             </button>
             <button
               type="button"
               className={`text-sm font-medium ${view === 'blocked' ? 'text-foreground' : 'text-muted-foreground'}`}
               onClick={() => setView('blocked')}
             >
-              Blocked users
+              {t("profile.tabBlocked")}
             </button>
           </div>
         </DialogHeader>
@@ -253,7 +258,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
                       type="button"
                       onClick={handleRemoveImage}
                       className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center shadow-md hover:bg-destructive/90 transition-colors z-10"
-                      title="Remove profile image"
+                      title={t("profile.removeImage")}
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -269,7 +274,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
                 </div>
                 <div className="space-y-1 flex-1">
                   <h3 className="font-semibold text-lg">{user?.email}</h3>
-                  <p className="text-sm text-muted-foreground">Ilissiot Account</p>
+                  <p className="text-sm text-muted-foreground">{t("profile.account")}</p>
                   <div className="flex gap-2 mt-2">
                     <Button
                       type="button"
@@ -280,7 +285,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
                       disabled={uploadingImage}
                     >
                       {uploadingImage ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Camera className="w-3 h-3 mr-1" />}
-                      Change photo
+                      {t("profile.changePhoto")}
                     </Button>
                     {profileImageUrl && (
                       <Button
@@ -291,7 +296,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
                         onClick={handleRemoveImage}
                       >
                         <Trash2 className="w-3 h-3 mr-1" />
-                        Remove
+                        {t("profile.remove")}
                       </Button>
                     )}
                   </div>
@@ -300,7 +305,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="firstName">First name</Label>
+                  <Label htmlFor="firstName">{t("profile.firstName")}</Label>
                   <Input 
                     id="firstName" 
                     value={firstName} 
@@ -309,7 +314,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="lastName">Last name</Label>
+                  <Label htmlFor="lastName">{t("profile.lastName")}</Label>
                   <Input 
                     id="lastName" 
                     value={lastName} 
@@ -320,19 +325,19 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="username">Username</Label>
+                <Label htmlFor="username">{t("profile.username")}</Label>
                 <Input
                   id="username"
                   value={username}
                   onChange={e => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-                  placeholder="username"
+                  placeholder={t("profile.usernamePlaceholder")}
                   className="rounded-xl bg-muted/50 border-transparent focus:bg-background focus:border-primary transition-all"
                 />
-                <p className="text-xs text-muted-foreground">Used for mentions, for example @username</p>
+                <p className="text-xs text-muted-foreground">{t("profile.usernameHelp")}</p>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="birthday">Birthday</Label>
+                <Label htmlFor="birthday">{t("profile.birthday")}</Label>
                 <Input 
                   id="birthday" 
                   type="date"
@@ -343,8 +348,25 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
               </div>
 
               <div className="space-y-2">
+                <Label htmlFor="language">{t("profile.language")}</Label>
+                <select
+                  id="language"
+                  value={language}
+                  onChange={(e) => setLanguage(resolveLanguage(e.target.value))}
+                  className="w-full h-10 rounded-xl bg-muted/50 border border-transparent px-3 text-sm focus:bg-background focus:border-primary transition-all"
+                >
+                  {APP_LANGUAGES.map((langCode) => (
+                    <option key={langCode} value={langCode}>
+                      {getLanguageLabel(langCode)}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">{t("profile.languageHelp")}</p>
+              </div>
+
+              <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="bio">Bio</Label>
+                  <Label htmlFor="bio">{t("profile.bio")}</Label>
                   {bio && (
                     <button
                       type="button"
@@ -352,7 +374,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
                       className="text-xs text-destructive hover:text-destructive/80 transition-colors flex items-center gap-1"
                     >
                       <Trash2 className="w-3 h-3" />
-                      Clear bio
+                      {t("profile.clearBio")}
                     </button>
                   )}
                 </div>
@@ -360,7 +382,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
                   id="bio" 
                   value={bio} 
                   onChange={e => setBio(e.target.value)}
-                  placeholder="Tell us a little bit about yourself"
+                  placeholder={t("profile.bioPlaceholder")}
                   className="resize-none rounded-xl bg-muted/50 border-transparent focus:bg-background focus:border-primary transition-all"
                   rows={3}
                 />
@@ -371,17 +393,17 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
             <>
               {/* Appearance Mode Selection */}
               <div className="space-y-3">
-                <Label className="text-base font-semibold">Appearance Mode</Label>
+                <Label className="text-base font-semibold">{t("profile.appearanceMode")}</Label>
                 <div className="grid grid-cols-3 gap-3">
                   {[
-                    { name: 'light', label: 'Light', bg: 'from-slate-50 to-slate-200', border: 'border-slate-300' },
-                    { name: 'dark', label: 'Dark', bg: 'from-slate-800 to-slate-950', border: 'border-slate-700' },
-                    { name: 'greenish', label: 'Greenish', bg: 'from-emerald-100 to-teal-200', border: 'border-emerald-300' },
-                    { name: 'yellowish', label: 'Yellowish', bg: 'from-amber-100 to-yellow-200', border: 'border-amber-300' },
-                    { name: 'blueish', label: 'Blueish', bg: 'from-blue-100 to-cyan-200', border: 'border-blue-300' },
-                    { name: 'purpleish', label: 'Purpleish', bg: 'from-purple-100 to-violet-200', border: 'border-purple-300' },
-                    { name: 'pinkish', label: 'Pinkish', bg: 'from-pink-100 to-rose-200', border: 'border-pink-300' },
-                    { name: 'orangeish', label: 'Orangeish', bg: 'from-orange-100 to-amber-200', border: 'border-orange-300' },
+                    { name: 'light', label: t('design.mode.light'), bg: 'from-slate-50 to-slate-200', border: 'border-slate-300' },
+                    { name: 'dark', label: t('design.mode.dark'), bg: 'from-slate-800 to-slate-950', border: 'border-slate-700' },
+                    { name: 'greenish', label: t('design.mode.greenish'), bg: 'from-emerald-100 to-teal-200', border: 'border-emerald-300' },
+                    { name: 'yellowish', label: t('design.mode.yellowish'), bg: 'from-amber-100 to-yellow-200', border: 'border-amber-300' },
+                    { name: 'blueish', label: t('design.mode.blueish'), bg: 'from-blue-100 to-cyan-200', border: 'border-blue-300' },
+                    { name: 'purpleish', label: t('design.mode.purpleish'), bg: 'from-purple-100 to-violet-200', border: 'border-purple-300' },
+                    { name: 'pinkish', label: t('design.mode.pinkish'), bg: 'from-pink-100 to-rose-200', border: 'border-pink-300' },
+                    { name: 'orangeish', label: t('design.mode.orangeish'), bg: 'from-orange-100 to-amber-200', border: 'border-orange-300' },
                   ].map(({ name, label, bg, border }) => (
                     <button
                       key={name}
@@ -404,18 +426,18 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
 
               {/* Color Theme Selection */}
               <div className="space-y-3">
-                <Label className="text-base font-semibold">Color Theme</Label>
+                <Label className="text-base font-semibold">{t("profile.colorTheme")}</Label>
                 <div className="grid grid-cols-3 gap-3">
                   {[
-                    { name: 'blue', label: 'Blue', color: 'hsl(202, 83%, 55%)' },
-                    { name: 'green', label: 'Green', color: 'hsl(142, 76%, 45%)' },
-                    { name: 'red', label: 'Red', color: 'hsl(0, 72%, 51%)' },
-                    { name: 'gold', label: 'Gold', color: 'hsl(45, 93%, 47%)' },
-                    { name: 'purple', label: 'Purple', color: 'hsl(271, 81%, 56%)' },
-                    { name: 'pink', label: 'Pink', color: 'hsl(330, 81%, 60%)' },
-                    { name: 'teal', label: 'Teal', color: 'hsl(173, 80%, 40%)' },
-                    { name: 'orange', label: 'Orange', color: 'hsl(24, 95%, 53%)' },
-                    { name: 'indigo', label: 'Indigo', color: 'hsl(239, 84%, 67%)' },
+                    { name: 'blue', label: t('design.color.blue'), color: 'hsl(202, 83%, 55%)' },
+                    { name: 'green', label: t('design.color.green'), color: 'hsl(142, 76%, 45%)' },
+                    { name: 'red', label: t('design.color.red'), color: 'hsl(0, 72%, 51%)' },
+                    { name: 'gold', label: t('design.color.gold'), color: 'hsl(45, 93%, 47%)' },
+                    { name: 'purple', label: t('design.color.purple'), color: 'hsl(271, 81%, 56%)' },
+                    { name: 'pink', label: t('design.color.pink'), color: 'hsl(330, 81%, 60%)' },
+                    { name: 'teal', label: t('design.color.teal'), color: 'hsl(173, 80%, 40%)' },
+                    { name: 'orange', label: t('design.color.orange'), color: 'hsl(24, 95%, 53%)' },
+                    { name: 'indigo', label: t('design.color.indigo'), color: 'hsl(239, 84%, 67%)' },
                   ].map(({ name, label, color }) => (
                     <button
                       key={name}
@@ -441,7 +463,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
 
               {/* Font Type Selection */}
               <div className="space-y-3">
-                <Label className="text-base font-semibold">Font Type</Label>
+                <Label className="text-base font-semibold">{t("profile.fontType")}</Label>
                 <div className="grid grid-cols-2 gap-3">
                   {[
                     { name: 'inter', label: 'Inter', sampleFamily: 'Inter, sans-serif' },
@@ -474,12 +496,12 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
 
               {/* Text Size Selection */}
               <div className="space-y-3">
-                <Label className="text-base font-semibold">Text Size</Label>
+                <Label className="text-base font-semibold">{t("profile.textSize")}</Label>
                 <div className="grid grid-cols-3 gap-3">
                   {[
-                    { name: 'small', label: 'Small', sampleClass: 'text-xs' },
-                    { name: 'normal', label: 'Normal', sampleClass: 'text-sm' },
-                    { name: 'large', label: 'Large', sampleClass: 'text-base' },
+                    { name: 'small', label: t('design.size.small'), sampleClass: 'text-xs' },
+                    { name: 'normal', label: t('design.size.normal'), sampleClass: 'text-sm' },
+                    { name: 'large', label: t('design.size.large'), sampleClass: 'text-base' },
                   ].map(({ name, label, sampleClass }) => (
                     <button
                       key={name}
@@ -505,7 +527,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
             <div>
               {blockedUsersQuery.isLoading && <Loader2 className="animate-spin" />}
               {blockedUsersQuery.data?.length === 0 && !blockedUsersQuery.isLoading && (
-                <p className="text-sm text-muted-foreground">You haven't blocked anyone.</p>
+                <p className="text-sm text-muted-foreground">{t("profile.noBlockedUsers")}</p>
               )}
               {blockedUsersQuery.data?.map(u => (
                 <div key={u.id} className="flex items-center justify-between py-2">
@@ -514,7 +536,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
                       <AvatarImage src={u.profileImageUrl || ''} />
                       <AvatarFallback>{(u.firstName || u.email || 'U')[0]}</AvatarFallback>
                     </Avatar>
-                    <span className="text-sm">{u.firstName || u.email || 'Unknown'}</span>
+                    <span className="text-sm">{u.firstName || u.email || t("profile.unknown")}</span>
                   </div>
                   <Button
                     size="sm"
@@ -525,7 +547,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
                       });
                     }}
                   >
-                    Unblock
+                    {t("profile.unblock")}
                   </Button>
                 </div>
               ))}
@@ -534,7 +556,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
         </div>
         <div className="p-6 pt-0 flex justify-end gap-3">
           <Button variant="ghost" className="rounded-xl" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           {(view === 'profile' || view === 'design') && (
             <Button 
@@ -543,7 +565,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
               className="rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 hover:shadow-xl hover:-translate-y-0.5 transition-all"
             >
               {updateProfile.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Save Changes
+              {t("common.saveChanges")}
             </Button>
           )}
         </div>
@@ -554,7 +576,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
     <Dialog open={!!cropImageSrc} onOpenChange={(open) => { if (!open) handleCropCancel(); }}>
       <DialogContent className="sm:max-w-[450px] rounded-2xl p-0 overflow-hidden border-border/50 shadow-2xl" aria-describedby={undefined}>
         <DialogHeader className="p-4 border-b border-border/50">
-          <DialogTitle>Crop profile image</DialogTitle>
+          <DialogTitle>{t("profile.cropTitle")}</DialogTitle>
         </DialogHeader>
         <div className="relative w-full" style={{ height: 320 }}>
           {cropImageSrc && (
@@ -572,7 +594,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
           )}
         </div>
         <div className="px-6 py-3">
-          <Label className="text-xs text-muted-foreground mb-1 block">Zoom</Label>
+          <Label className="text-xs text-muted-foreground mb-1 block">{t("profile.zoom")}</Label>
           <Slider
             min={1}
             max={3}
@@ -583,7 +605,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
         </div>
         <div className="p-4 pt-0 flex justify-end gap-3">
           <Button variant="ghost" className="rounded-xl" onClick={handleCropCancel}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             onClick={handleCropConfirm}
@@ -591,7 +613,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
             className="rounded-xl"
           >
             {uploadingImage && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Apply
+            {t("profile.apply")}
           </Button>
         </div>
       </DialogContent>
@@ -601,7 +623,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
     <Dialog open={!!previewImageUrl} onOpenChange={(open) => { if (!open) setPreviewImageUrl(null); }}>
       <DialogContent className="sm:max-w-[600px] rounded-2xl p-0 overflow-hidden border-border/50 shadow-2xl" aria-describedby={undefined}>
         <DialogHeader className="p-4 border-b border-border/50">
-          <DialogTitle>Profile Photo</DialogTitle>
+          <DialogTitle>{t("profile.photoTitle")}</DialogTitle>
         </DialogHeader>
         <div className="flex items-center justify-center bg-muted/50 p-8">
           {previewImageUrl && (
@@ -614,7 +636,7 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
         </div>
         <div className="p-4 flex justify-end">
           <Button variant="ghost" className="rounded-xl" onClick={() => setPreviewImageUrl(null)}>
-            Close
+            {t("common.close")}
           </Button>
         </div>
       </DialogContent>

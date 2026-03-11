@@ -3,6 +3,8 @@ import { usePinnedMessages, useUnpinMessage } from "@/hooks/use-chats";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { useState, useRef, useEffect } from "react";
+import { useAuth } from "@/hooks/use-auth";
+import { resolveLanguage, translate } from "@/lib/i18n";
 
 interface PinnedMessagesButtonProps {
   chatId: number;
@@ -11,6 +13,9 @@ interface PinnedMessagesButtonProps {
 }
 
 export function PinnedMessagesButton({ chatId, currentUserId, onNavigateToMessage }: PinnedMessagesButtonProps) {
+  const { user } = useAuth();
+  const language = resolveLanguage(user?.language);
+  const t = (key: string) => translate(language, key);
   const { data: pinnedMessages } = usePinnedMessages(chatId);
   const unpinMessage = useUnpinMessage();
   const [open, setOpen] = useState(false);
@@ -39,7 +44,7 @@ export function PinnedMessagesButton({ chatId, currentUserId, onNavigateToMessag
         size="icon"
         className="text-muted-foreground rounded-full h-9 w-9 hover:text-primary relative"
         onClick={() => setOpen(!open)}
-        title="Pinned messages"
+        title={t("pinned.title")}
       >
         <Pin className="w-5 h-5" />
         {pinnedMessages.length > 0 && (
@@ -55,7 +60,7 @@ export function PinnedMessagesButton({ chatId, currentUserId, onNavigateToMessag
             <div className="flex items-center gap-2">
               <Pin className="w-4 h-4 text-primary" />
               <span className="text-sm font-semibold text-foreground">
-                Pinned Messages ({pinnedMessages.length})
+                {t("pinned.title")} ({pinnedMessages.length})
               </span>
             </div>
             <Button
@@ -88,7 +93,7 @@ export function PinnedMessagesButton({ chatId, currentUserId, onNavigateToMessag
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-0.5">
                     <span className="text-xs font-semibold text-foreground">
-                      {pinned.message?.sender?.firstName || 'Unknown'}
+                      {pinned.message?.sender?.firstName || t("profile.unknown")}
                     </span>
                     {pinned.pinnedAt && (
                       <span className="text-[10px] text-muted-foreground">
@@ -97,7 +102,7 @@ export function PinnedMessagesButton({ chatId, currentUserId, onNavigateToMessag
                     )}
                   </div>
                   <p className="text-sm text-foreground/80 line-clamp-2 leading-snug">
-                    {pinned.message?.content || '📎 Attachment'}
+                    {pinned.message?.content || t("pinned.attachment")}
                   </p>
                 </div>
 
@@ -109,7 +114,7 @@ export function PinnedMessagesButton({ chatId, currentUserId, onNavigateToMessag
                     e.stopPropagation();
                     unpinMessage.mutate({ chatId, messageId: pinned.messageId });
                   }}
-                  title="Unpin"
+                  title={t("pinned.unpin")}
                 >
                   <X className="w-3.5 h-3.5" />
                 </Button>

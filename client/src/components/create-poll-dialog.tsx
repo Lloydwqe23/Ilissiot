@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
+import { useAuth } from "@/hooks/use-auth";
+import { resolveLanguage, translate } from "@/lib/i18n";
 
 interface CreatePollDialogProps {
   open: boolean;
@@ -14,6 +16,9 @@ interface CreatePollDialogProps {
 }
 
 export function CreatePollDialog({ open, onOpenChange, chatId }: CreatePollDialogProps) {
+  const { user } = useAuth();
+  const language = resolveLanguage(user?.language);
+  const t = (key: string) => translate(language, key);
   const [question, setQuestion] = useState("");
   const [options, setOptions] = useState<string[]>(["", ""]);
   const [allowMultipleAnswers, setAllowMultipleAnswers] = useState(false);
@@ -85,36 +90,36 @@ export function CreatePollDialog({ open, onOpenChange, chatId }: CreatePollDialo
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <BarChart3 className="w-5 h-5 text-primary" />
-            Create Poll
+            {t("poll.create")}
           </DialogTitle>
           <DialogDescription>
-            Ask a question and provide options for group members to vote on.
+            {t("poll.description")}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
           {/* Question */}
           <div className="space-y-2">
-            <Label htmlFor="question">Question *</Label>
+            <Label htmlFor="question">{t("poll.question")}</Label>
             <Input
               id="question"
-              placeholder="What's your question?"
+              placeholder={t("poll.questionPlaceholder")}
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
               maxLength={200}
             />
             <p className="text-xs text-muted-foreground">
-              {question.length}/200 characters
+              {question.length}/200 {t("poll.characters")}
             </p>
           </div>
 
           {/* Options */}
           <div className="space-y-2">
-            <Label>Options * (at least 2)</Label>
+            <Label>{t("poll.options")}</Label>
             {options.map((option, index) => (
               <div key={index} className="flex items-center gap-2">
                 <Input
-                  placeholder={`Option ${index + 1}`}
+                  placeholder={`${t("poll.option")} ${index + 1}`}
                   value={option}
                   onChange={(e) => handleOptionChange(index, e.target.value)}
                   maxLength={100}
@@ -139,21 +144,21 @@ export function CreatePollDialog({ open, onOpenChange, chatId }: CreatePollDialo
                 className="w-full"
               >
                 <Plus className="w-4 h-4 mr-2" />
-                Add Option
+                {t("poll.addOption")}
               </Button>
             )}
           </div>
 
           {/* Poll Settings */}
           <div className="space-y-3 pt-2 border-t border-border">
-            <Label className="text-sm font-semibold">Poll Settings</Label>
+            <Label className="text-sm font-semibold">{t("poll.settings")}</Label>
 
             {/* Multiple Answers */}
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium">Allow multiple answers</p>
+                <p className="text-sm font-medium">{t("poll.allowMultiple")}</p>
                 <p className="text-xs text-muted-foreground">
-                  Users can select more than one option
+                  {t("poll.allowMultipleHelp")}
                 </p>
               </div>
               <Button
@@ -161,16 +166,16 @@ export function CreatePollDialog({ open, onOpenChange, chatId }: CreatePollDialo
                 size="sm"
                 onClick={() => setAllowMultipleAnswers(!allowMultipleAnswers)}
               >
-                {allowMultipleAnswers ? "On" : "Off"}
+                {allowMultipleAnswers ? t("common.on") : t("common.off")}
               </Button>
             </div>
 
             {/* Anonymous */}
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium">Anonymous voting</p>
+                <p className="text-sm font-medium">{t("poll.anonymousVoting")}</p>
                 <p className="text-xs text-muted-foreground">
-                  Hide who voted for what
+                  {t("poll.anonymousHelp")}
                 </p>
               </div>
               <Button
@@ -178,7 +183,7 @@ export function CreatePollDialog({ open, onOpenChange, chatId }: CreatePollDialo
                 size="sm"
                 onClick={() => setIsAnonymous(!isAnonymous)}
               >
-                {isAnonymous ? "On" : "Off"}
+                {isAnonymous ? t("common.on") : t("common.off")}
               </Button>
             </div>
 
@@ -186,9 +191,9 @@ export function CreatePollDialog({ open, onOpenChange, chatId }: CreatePollDialo
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium">Auto-close poll</p>
+                  <p className="text-sm font-medium">{t("poll.autoClose")}</p>
                   <p className="text-xs text-muted-foreground">
-                    Poll closes automatically after set days
+                    {t("poll.autoCloseHelp")}
                   </p>
                 </div>
                 <Button
@@ -196,16 +201,16 @@ export function CreatePollDialog({ open, onOpenChange, chatId }: CreatePollDialo
                   size="sm"
                   onClick={() => setHasExpiry(!hasExpiry)}
                 >
-                  {hasExpiry ? "On" : "Off"}
+                  {hasExpiry ? t("common.on") : t("common.off")}
                 </Button>
               </div>
 
               {hasExpiry && (
                 <div className="space-y-2 pl-4">
                   <div className="flex items-center justify-between">
-                    <Label className="text-xs">Close after</Label>
+                    <Label className="text-xs">{t("poll.closeAfter")}</Label>
                     <span className="text-sm font-medium">
-                      {expiryDays} {expiryDays === 1 ? "day" : "days"}
+                      {expiryDays} {expiryDays === 1 ? t("common.day") : t("common.days")}
                     </span>
                   </div>
                   <Slider
@@ -228,13 +233,13 @@ export function CreatePollDialog({ open, onOpenChange, chatId }: CreatePollDialo
             onClick={() => onOpenChange(false)}
             disabled={createPoll.isPending}
           >
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             onClick={handleCreatePoll}
             disabled={!canCreate || createPoll.isPending}
           >
-            {createPoll.isPending ? "Creating..." : "Create Poll"}
+            {createPoll.isPending ? t("poll.creating") : t("poll.create")}
           </Button>
         </div>
       </DialogContent>

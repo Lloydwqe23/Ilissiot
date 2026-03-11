@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useChatWebSocket } from "@/hooks/use-websocket";
 import { useNotificationManager } from "@/hooks/use-notifications";
 import { motion } from "framer-motion";
+import { resolveLanguage, translate } from "@/lib/i18n";
 
 /**
  * On mobile, auto-open the sidebar sheet when no chat is selected
@@ -28,6 +29,8 @@ function MobileSidebarController({ hasChatOpen }: { hasChatOpen: boolean }) {
 export function ChatLayout() {
   const [match, params] = useRoute("/chat/:id");
   const { user } = useAuth();
+  const language = resolveLanguage(user?.language);
+  const t = (key: string) => translate(language, key);
   const { notifications, addNotification, dismissNotification } = useNotificationManager();
   
   // Get active chat ID for notification filtering
@@ -67,9 +70,9 @@ export function ChatLayout() {
                   className="w-20 h-20 rounded-2xl shadow-sm border border-border mx-auto"
                 />
                 <div className="space-y-1">
-                  <h3 className="text-xl font-display font-semibold text-foreground">Ilissiot Web</h3>
+                  <h3 className="text-xl font-display font-semibold text-foreground">{t("app.name")}</h3>
                   <p className="text-muted-foreground text-sm max-w-[250px] mx-auto">
-                    Select a chat from the sidebar or start a new conversation.
+                    {t("chat.selectPrompt")}
                   </p>
                 </div>
               </motion.div>

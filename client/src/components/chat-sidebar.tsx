@@ -19,6 +19,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, Con
 import { ProfileSettings } from "./profile-settings";
 import { UserSearch } from "./user-search";
 import { Skeleton } from "@/components/ui/skeleton";
+import { resolveLanguage, translate } from "@/lib/i18n";
 
 /** Small green dot shown on an avatar when the user is online. */
 function OnlineIndicator({ userId }: { userId: string | undefined }) {
@@ -46,10 +47,12 @@ function ChatSidebarItem({
   chat,
   isActive,
   closeMobileSidebar,
+  t,
 }: {
   chat: any;
   isActive: boolean;
   closeMobileSidebar: () => void;
+  t: (key: string) => string;
 }) {
   const { user } = useAuth();
   const otherMember = !chat.isGroup
@@ -58,7 +61,7 @@ function ChatSidebarItem({
   const otherUserId = otherMember?.userId || null;
   const displayName = (() => {
     if (chat.isGroup) return chat.name;
-    if (!otherMember) return "Saved Messages";
+    if (!otherMember) return t("chat.savedMessages");
     const { firstName, lastName, email } = otherMember.user;
     return [firstName, lastName].filter(Boolean).join(" ") || email || "Unknown";
   })();
@@ -123,7 +126,7 @@ function ChatSidebarItem({
           <div className="flex justify-between items-center">
             <span className="text-[13px] truncate text-sidebar-foreground/60 group-hover:text-sidebar-foreground/80 flex items-center gap-1">
               {lastMsg ? (() => {
-                const prefix = lastMsg.senderId === user?.id ? 'You: ' : '';
+                const prefix = lastMsg.senderId === user?.id ? t("chat.youPrefix") : '';
                 const attachments: any[] = (lastMsg.attachments || []).filter((a: any) => a.type !== 'reply' && a.type !== 'forward');
                 const hasForward = (lastMsg.attachments || []).some((a: any) => a.type === 'forward');
                 const forwardPrefix = hasForward ? '↗ ' : '';
@@ -133,24 +136,24 @@ function ChatSidebarItem({
                 if (attachments.length > 0) {
                   const first = attachments[0];
                   if (first.type === 'sticker') {
-                    return <>{prefix}{forwardPrefix}<Sticker className="w-3.5 h-3.5 inline" /> Sticker</>;
+                    return <>{prefix}{forwardPrefix}<Sticker className="w-3.5 h-3.5 inline" /> {t("chat.attachment.sticker")}</>;
                   }
                   if (first.type?.startsWith('call/')) {
-                    return <>{prefix}<Phone className="w-3.5 h-3.5 inline" /> Call</>;
+                    return <>{prefix}<Phone className="w-3.5 h-3.5 inline" /> {t("chat.attachment.call")}</>;
                   }
                   if (first.type?.startsWith('image/')) {
-                    return <>{prefix}{forwardPrefix}<Image className="w-3.5 h-3.5 inline" /> Photo</>;
+                    return <>{prefix}{forwardPrefix}<Image className="w-3.5 h-3.5 inline" /> {t("chat.attachment.photo")}</>;
                   }
                   if (first.type?.startsWith('video/')) {
-                    return <>{prefix}{forwardPrefix}<Video className="w-3.5 h-3.5 inline" /> Video</>;
+                    return <>{prefix}{forwardPrefix}<Video className="w-3.5 h-3.5 inline" /> {t("chat.attachment.video")}</>;
                   }
                   if (first.type?.startsWith('audio/')) {
-                    return <>{prefix}{forwardPrefix}<Mic className="w-3.5 h-3.5 inline" /> Audio</>;
+                    return <>{prefix}{forwardPrefix}<Mic className="w-3.5 h-3.5 inline" /> {t("chat.attachment.audio")}</>;
                   }
-                  return <>{prefix}{forwardPrefix}<FileText className="w-3.5 h-3.5 inline" /> {first.name || 'File'}</>;
+                  return <>{prefix}{forwardPrefix}<FileText className="w-3.5 h-3.5 inline" /> {first.name || t("chat.attachment.file")}</>;
                 }
-                return `${prefix}${forwardPrefix}Message`;
-              })() : 'Started a chat'}
+                return `${prefix}${forwardPrefix}${t("chat.attachment.message")}`;
+              })() : t("chat.startedAChat")}
             </span>
             {chat.unreadCount ? (
               <span className={`min-w-5 h-5 px-1.5 rounded-full flex items-center justify-center text-[10px] font-bold ml-2 ${'bg-primary text-primary-foreground'}`}>
@@ -162,47 +165,47 @@ function ChatSidebarItem({
         </Link>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuLabel>Chat</ContextMenuLabel>
+        <ContextMenuLabel>{t("chat.context.chat")}</ContextMenuLabel>
         {isPinned ? (
           <ContextMenuItem
             onClick={() => unpinMutation.mutate(chat.id)}
           >
             <PinOff className="w-4 h-4 mr-2" />
-            Unpin
+            {t("chat.context.unpin")}
           </ContextMenuItem>
         ) : (
           <ContextMenuItem
             onClick={() => pinMutation.mutate(chat.id)}
           >
             <Pin className="w-4 h-4 mr-2" />
-            Pin
+            {t("chat.context.pin")}
           </ContextMenuItem>
         )}
         {chatMuted ? (
           <ContextMenuItem onClick={() => setChatMute(chat.id, null)}>
             <Bell className="w-4 h-4 mr-2" />
-            Unmute
+            {t("chat.context.unmute")}
           </ContextMenuItem>
         ) : (
           <ContextMenuSub>
             <ContextMenuSubTrigger>
               <BellOff className="w-4 h-4 mr-2" />
-              Mute
+              {t("chat.context.mute")}
             </ContextMenuSubTrigger>
             <ContextMenuSubContent>
-              <ContextMenuItem onClick={() => setChatMute(chat.id, muteFor(1))}>1 hour</ContextMenuItem>
-              <ContextMenuItem onClick={() => setChatMute(chat.id, muteFor(8))}>8 hours</ContextMenuItem>
-              <ContextMenuItem onClick={() => setChatMute(chat.id, muteFor(24))}>1 day</ContextMenuItem>
-              <ContextMenuItem onClick={() => setChatMute(chat.id, muteFor(24 * 7))}>1 week</ContextMenuItem>
+              <ContextMenuItem onClick={() => setChatMute(chat.id, muteFor(1))}>{t("chat.context.muteHour")}</ContextMenuItem>
+              <ContextMenuItem onClick={() => setChatMute(chat.id, muteFor(8))}>{t("chat.context.mute8Hours")}</ContextMenuItem>
+              <ContextMenuItem onClick={() => setChatMute(chat.id, muteFor(24))}>{t("chat.context.muteDay")}</ContextMenuItem>
+              <ContextMenuItem onClick={() => setChatMute(chat.id, muteFor(24 * 7))}>{t("chat.context.muteWeek")}</ContextMenuItem>
               <ContextMenuSeparator />
-              <ContextMenuItem onClick={() => setChatMute(chat.id, "forever")}>Mute forever</ContextMenuItem>
+              <ContextMenuItem onClick={() => setChatMute(chat.id, "forever")}>{t("chat.context.muteForever")}</ContextMenuItem>
             </ContextMenuSubContent>
           </ContextMenuSub>
         )}
         <ContextMenuSeparator />
         <ContextMenuItem
           onClick={() => {
-            if (confirm('Delete this chat? This cannot be undone.')) {
+            if (confirm(t('chat.confirm.deleteChat'))) {
               deleteChatMutation.mutate(chat.id, {
                 onSuccess: () => {
                   if (isActive) navigate('/');
@@ -212,7 +215,7 @@ function ChatSidebarItem({
           }}
           className="text-destructive"
         >
-          Delete
+          {t("chat.context.delete")}
         </ContextMenuItem>
         {otherUserId && (
           <>
@@ -221,14 +224,14 @@ function ChatSidebarItem({
               <ContextMenuItem
                 onClick={() => unblockMutation.mutate(otherUserId)}
               >
-                Unblock user
+                {t("chat.context.unblockUser")}
               </ContextMenuItem>
             ) : (
               <ContextMenuItem
                 onClick={() => blockMutation.mutate(otherUserId)}
                 className="text-destructive"
               >
-                Block user
+                {t("chat.context.blockUser")}
               </ContextMenuItem>
             )}
           </>
@@ -238,7 +241,7 @@ function ChatSidebarItem({
             <ContextMenuSeparator />
             <ContextMenuItem
               onClick={() => {
-                if (confirm('Leave this group?')) {
+                if (confirm(t('chat.confirm.leaveGroup'))) {
                   leaveGroupMutation.mutate(chat.id, {
                     onSuccess: () => {
                       if (isActive) navigate('/');
@@ -248,7 +251,7 @@ function ChatSidebarItem({
               }}
               className="text-destructive"
             >
-              Leave group
+              {t("chat.context.leaveGroup")}
             </ContextMenuItem>
           </>
         )}
@@ -260,6 +263,8 @@ function ChatSidebarItem({
 
 export function ChatSidebar() {
   const { user, logout } = useAuth();
+  const language = resolveLanguage(user?.language);
+  const t = (key: string) => translate(language, key);
   const { data: chats, isLoading } = useChats();
   const { isMobile, setOpenMobile } = useSidebar();
   const [match, params] = useRoute("/chat/:id");
@@ -317,8 +322,8 @@ export function ChatSidebar() {
                     <div className="w-16 h-16 bg-sidebar-accent rounded-full flex items-center justify-center mx-auto mb-4">
                       <Edit className="w-8 h-8 text-sidebar-foreground/30" />
                     </div>
-                    <p className="text-sidebar-foreground/70 text-sm font-medium">No chats yet</p>
-                    <p className="text-xs text-sidebar-foreground/50 mt-1">Start a conversation!</p>
+                    <p className="text-sidebar-foreground/70 text-sm font-medium">{t("chat.noChats")}</p>
+                    <p className="text-xs text-sidebar-foreground/50 mt-1">{t("chat.startConversation")}</p>
                   </div>
                 ) : (
                   chats?.map(chat => {
@@ -329,6 +334,7 @@ export function ChatSidebar() {
                         chat={chat}
                         isActive={isActive}
                         closeMobileSidebar={closeMobileSidebar}
+                        t={t}
                       />
                     );
                   })
@@ -351,7 +357,7 @@ export function ChatSidebar() {
                   </Avatar>
                   <div className="text-left overflow-hidden">
                     <p className="text-sm font-medium truncate leading-tight text-sidebar-foreground">{user?.firstName || 'User'}</p>
-                    <p className="text-xs text-sidebar-foreground/50 truncate">My Profile</p>
+                    <p className="text-xs text-sidebar-foreground/50 truncate">{t("sidebar.myProfile")}</p>
                   </div>
                 </div>
                 <MoreVertical className="w-4 h-4 text-sidebar-foreground/50" />
@@ -361,18 +367,18 @@ export function ChatSidebar() {
               <DropdownMenuLabel className="font-normal">
                 <div className="flex flex-col space-y-1">
                   <p className="text-sm font-medium leading-none">{user?.email}</p>
-                  <p className="text-xs text-muted-foreground leading-none">Ilissiot Account</p>
+                  <p className="text-xs text-muted-foreground leading-none">{t("sidebar.account")}</p>
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setSettingsOpen(true)} className="rounded-lg cursor-pointer py-2">
                 <Settings className="mr-2 h-4 w-4 text-muted-foreground" />
-                <span>Profile Settings</span>
+                <span>{t("sidebar.profileSettings")}</span>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => logout()} className="text-destructive rounded-lg cursor-pointer py-2">
                 <LogOut className="mr-2 h-4 w-4" />
-                <span>Log out</span>
+                <span>{t("sidebar.logOut")}</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
