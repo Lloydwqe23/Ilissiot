@@ -8,6 +8,7 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 
 const __dirname = process.cwd();
+const publicDir = path.join(__dirname, "public");
 
 const app = express();
 const httpServer = createServer(app);
@@ -49,7 +50,7 @@ const apiLimiter = rateLimit({
 app.use('/api/', apiLimiter);
 
 // Serve static files from public directory (for uploads)
-app.use(express.static(path.join(__dirname, "../public")));
+app.use(express.static(publicDir));
 
 // Set UTF-8 encoding for API responses
 app.use('/api', (req, res, next) => {

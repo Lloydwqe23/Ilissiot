@@ -16,10 +16,20 @@ if (!existsSync(uploadDir)) {
   mkdirSync(uploadDir, { recursive: true });
 }
 
-const useCloudinary =
-  !!process.env.CLOUDINARY_CLOUD_NAME &&
-  !!process.env.CLOUDINARY_API_KEY &&
-  !!process.env.CLOUDINARY_API_SECRET;
+const requiredCloudinaryEnv = [
+  "CLOUDINARY_CLOUD_NAME",
+  "CLOUDINARY_API_KEY",
+  "CLOUDINARY_API_SECRET",
+] as const;
+
+const missingCloudinaryEnv = requiredCloudinaryEnv.filter((key) => !process.env[key]);
+const useCloudinary = missingCloudinaryEnv.length === 0;
+
+if (process.env.NODE_ENV === "production" && !useCloudinary) {
+  throw new Error(
+    `Cloudinary is required in production. Missing env vars: ${missingCloudinaryEnv.join(", ")}`
+  );
+}
 
 if (useCloudinary) {
   cloudinary.config({
@@ -71,9 +81,18 @@ export function registerUploadRoutes(app: Express) {
       return res.status(400).json({ message: "No file provided" });
     }
 
-    const cloudinaryUrl = typeof req.file.path === "string" ? req.file.path : null;
-    const fileUrl = cloudinaryUrl && /^https?:\/\//.test(cloudinaryUrl)
-      ? cloudinaryUrl
+    const rawCloudinaryUrl =
+      (typeof req.file.path === "string" && req.file.path) ||
+      (typeof req.file.secure_url === "string" && req.file.secure_url) ||
+      (typeof req.file.url === "string" && req.file.url) ||
+      null;
+
+    if (useCloudinary && (!rawCloudinaryUrl || !/^https?:\/\//.test(rawCloudinaryUrl))) {
+      return res.status(500).json({ message: "Cloud upload failed: URL was not returned" });
+    }
+
+    const fileUrl = rawCloudinaryUrl && /^https?:\/\//.test(rawCloudinaryUrl)
+      ? rawCloudinaryUrl
       : `/uploads/${encodeURIComponent(req.file.filename)}`;
     // Decode filename from latin1 to utf-8 (multer quirk with non-ASCII names)
     const fileName = Buffer.from(req.file.originalname, 'latin1').toString('utf-8');
@@ -89,6 +108,7 @@ export function registerUploadRoutes(app: Express) {
 
   // Keep local static serving only for non-Cloudinary mode.
   if (!useCloudinary) {
+    console.warn("[upload] Cloudinary env vars are missing. Using local /uploads storage.");
     app.use(
       "/uploads",
       express.static(uploadDir, {
