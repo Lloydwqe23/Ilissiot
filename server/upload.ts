@@ -1,6 +1,9 @@
 // multer has no types in this project
 // @ts-ignore
 import multer from "multer";
+import express from "express";
+import { v2 as cloudinary } from "cloudinary";
+import { CloudinaryStorage } from "multer-storage-cloudinary";
 import path from "path";
 import { existsSync, mkdirSync } from "fs";
 import type { Express, Request, Response } from "express";
@@ -13,7 +16,20 @@ if (!existsSync(uploadDir)) {
   mkdirSync(uploadDir, { recursive: true });
 }
 
-const storage = multer.diskStorage({
+const useCloudinary =
+  !!process.env.CLOUDINARY_CLOUD_NAME &&
+  !!process.env.CLOUDINARY_API_KEY &&
+  !!process.env.CLOUDINARY_API_SECRET;
+
+if (useCloudinary) {
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+  });
+}
+
+const diskStorage = multer.diskStorage({
   destination: (req: any, file: any, cb: any) => {
     cb(null, uploadDir);
   },
@@ -34,8 +50,18 @@ const storage = multer.diskStorage({
   },
 });
 
+const cloudinaryStorage = new CloudinaryStorage({
+  cloudinary,
+  params: async () => ({
+    folder: "ilissiot_media",
+    resource_type: "auto",
+  }),
+});
+
+const activeStorage = useCloudinary ? cloudinaryStorage : diskStorage;
+
 const upload = multer({
-  storage,
+  storage: activeStorage,
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
 });
 
@@ -45,7 +71,10 @@ export function registerUploadRoutes(app: Express) {
       return res.status(400).json({ message: "No file provided" });
     }
 
-    const fileUrl = `/uploads/${encodeURIComponent(req.file.filename)}`;
+    const cloudinaryUrl = typeof req.file.path === "string" ? req.file.path : null;
+    const fileUrl = cloudinaryUrl && /^https?:\/\//.test(cloudinaryUrl)
+      ? cloudinaryUrl
+      : `/uploads/${encodeURIComponent(req.file.filename)}`;
     // Decode filename from latin1 to utf-8 (multer quirk with non-ASCII names)
     const fileName = Buffer.from(req.file.originalname, 'latin1').toString('utf-8');
 
@@ -58,13 +87,15 @@ export function registerUploadRoutes(app: Express) {
     });
   });
 
-  // Serve uploaded files statically
-  app.use("/uploads", (req, res, next) => {
-    // Security: ensure path doesn't escape uploads directory
-    const filePath = path.join(uploadDir, req.path);
-    if (!filePath.startsWith(uploadDir)) {
-      return res.status(403).json({ message: "Forbidden" });
-    }
-    next();
-  });
+  // Keep local static serving only for non-Cloudinary mode.
+  if (!useCloudinary) {
+    app.use(
+      "/uploads",
+      express.static(uploadDir, {
+        fallthrough: false,
+        index: false,
+        redirect: false,
+      })
+    );
+  }
 }
