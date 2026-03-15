@@ -33,6 +33,7 @@ export function AuthPage() {
       const res = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify(loginForm),
       });
 
@@ -76,6 +77,7 @@ export function AuthPage() {
       const res = await fetch("/api/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
           email: registerForm.email,
           username: normalizedUsername,

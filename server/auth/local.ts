@@ -109,6 +109,7 @@ export async function setupAuth(app: Express) {
   sessionMiddleware = session({
     secret: process.env.SESSION_SECRET || "dev-secret-key-CHANGE-ME",
     store: sessionStore,
+    proxy: process.env.NODE_ENV === "production",
     resave: false,
     saveUninitialized: false,
     name: 'connect.sid',
