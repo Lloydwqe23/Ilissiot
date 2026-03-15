@@ -25,7 +25,21 @@ declare module "http" {
 
 // A05: Security headers via helmet
 app.use(helmet({
-  contentSecurityPolicy: process.env.NODE_ENV === 'production' ? undefined : false,
+  contentSecurityPolicy: process.env.NODE_ENV === 'production' ? {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "https:", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "https://res.cloudinary.com"],
+      mediaSrc: ["'self'", "https://res.cloudinary.com"],
+      connectSrc: ["'self'", "wss:", "ws:"],
+      fontSrc: ["'self'", "https:", "data:"],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'self'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+    },
+  } : false,
   crossOriginEmbedderPolicy: false,
 }));
 
