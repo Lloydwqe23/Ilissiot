@@ -24,6 +24,7 @@ export function useChatWebSocket(
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const intentionalRef = useRef(false);
+  const isVisibleRef = useRef(!document.hidden);
   // Keep fresh references so the WS callback always sees the latest handlers
   const callRef = useRef(call);
   callRef.current = call;
