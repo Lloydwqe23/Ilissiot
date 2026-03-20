@@ -209,6 +209,35 @@ export async function registerRoutes(
     }
   });
 
+  // Search channels globally (not only joined channels)
+  app.get('/api/channels/search', isAuthenticated, async (req: any, res) => {
+    try {
+      const query = String(req.query.q || '');
+      const userId = req.user.claims.sub;
+      if (!query.trim()) return res.json([]);
+      const channels = await storage.searchChannels(query, userId);
+      res.json(channels);
+    } catch (err) {
+      console.error('Search channels error:', err);
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  });
+
+  // Join channel by id
+  app.post('/api/channels/:chatId/join', isAuthenticated, async (req: any, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const userId = req.user.claims.sub;
+      const chat = await storage.joinChannel(chatId, userId);
+      res.json(chat);
+    } catch (err: any) {
+      if (err.message === 'Chat not found') return res.status(404).json({ message: err.message });
+      if (err.message === 'Not a channel') return res.status(400).json({ message: err.message });
+      console.error('Join channel error:', err);
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  });
+
   // Block another user
   app.post('/api/users/:userId/block', isAuthenticated, async (req: any, res) => {
     try {
@@ -357,6 +386,22 @@ export async function registerRoutes(
     }
   });
 
+  // Create channel (admin-post only)
+  app.post(api.chats.createChannel.path, isAuthenticated, async (req: any, res) => {
+    try {
+      const input = api.chats.createChannel.input.parse(req.body);
+      const currentUserId = req.user.claims.sub;
+      const chat = await storage.createChannel(input.name, currentUserId);
+      res.status(201).json(chat);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      console.error("Create channel error:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // Update group chat (name, avatar)
   app.patch('/api/chats/:chatId', isAuthenticated, async (req: any, res) => {
     try {
@@ -478,6 +523,9 @@ export async function registerRoutes(
             (a, b) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime()
           );
           const newAdmin = sorted[0];
+          if (!newAdmin?.userId) {
+            return res.status(500).json({ message: "Unable to determine new admin" });
+          }
           await storage.updateMemberRole(chatId, newAdmin.userId, 'admin');
           // Transfer creatorId to the new admin
           await storage.updateChatCreator(chatId, newAdmin.userId);
@@ -486,7 +534,11 @@ export async function registerRoutes(
           const sortedAdmins = [...remainingAdmins].sort(
             (a, b) => new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime()
           );
-          await storage.updateChatCreator(chatId, sortedAdmins[0].userId);
+          const nextCreatorId = sortedAdmins[0]?.userId;
+          if (!nextCreatorId) {
+            return res.status(500).json({ message: "Unable to determine new creator" });
+          }
+          await storage.updateChatCreator(chatId, nextCreatorId);
         }
       }
 
@@ -685,6 +737,14 @@ export async function registerRoutes(
         return res.status(401).json({ message: "Unauthorized" });
       }
 
+      // Channels are read-only for members; only admins can post.
+      if (chat.isChannel) {
+        const me = chat.members.find(m => m.userId === userId);
+        if (!me || me.role !== 'admin') {
+          return res.status(403).json({ message: "Only channel admins can post messages" });
+        }
+      }
+
       // Block check: in 1-on-1 chats, prevent messaging if either user blocked the other
       if (!chat.isGroup) {
         const otherMember = chat.members.find(m => m.userId !== userId);
@@ -849,7 +909,9 @@ export async function registerRoutes(
           return res.status(403).json({ message: "Only the group creator can delete the group" });
         }
         // Collect member IDs before deletion to broadcast
-        const memberIds = chat.members.map(m => m.userId).filter(id => id !== userId);
+        const memberIds = chat.members
+          .map(m => m.userId)
+          .filter((id): id is string => Boolean(id) && id !== userId);
         console.log(`[DELETE GROUP] User ${userId} deleting group chat ${chatId}`);
         await storage.deleteChat(chatId);
         console.log(`[DELETE GROUP] Group chat ${chatId} deleted successfully`);
@@ -1269,6 +1331,16 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Poll must have a question and at least 2 options" });
       }
 
+      // Check if channel and restrict poll creation to channel admins
+      const chat = await storage.getChat(chatId);
+      if (!chat) return res.status(404).json({ message: "Chat not found" });
+      if (chat.isChannel) {
+        const member = chat.members.find(m => m.userId === userId);
+        if (!member || member.role !== 'admin') {
+          return res.status(403).json({ message: "Only channel admins can create polls" });
+        }
+      }
+
       const poll = await storage.createPoll(
         chatId,
         userId,
@@ -1280,9 +1352,9 @@ export async function registerRoutes(
       );
 
       // Broadcast to chat members
-      const chat = await storage.getChat(chatId);
-      if (chat) {
-        chat.members.forEach(member => {
+       const updatedChat = await storage.getChat(chatId);
+       if (updatedChat) {
+         updatedChat.members.forEach(member => {
           sendToUser(member.userId!, {
             type: WS_EVENTS.POLL_NEW,
             payload: poll,
@@ -1300,6 +1372,116 @@ export async function registerRoutes(
       }
       console.error('Error creating poll:', err);
       res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Toggle comments for a channel (admin only)
+  app.patch('/api/chats/:chatId/comments-enabled', isAuthenticated, async (req: any, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      const userId = req.user.claims.sub as string;
+      const { enabled } = req.body as { enabled: boolean };
+
+      const updated = await storage.setChannelCommentsEnabled(chatId, userId, Boolean(enabled));
+      res.json(updated);
+    } catch (err: any) {
+      if (
+        err.message === 'Only channel admins can update comments settings' ||
+        err.message === 'Not a channel'
+      ) {
+        return res.status(403).json({ message: err.message });
+      }
+      if (err.message === 'Chat not found') {
+        return res.status(404).json({ message: err.message });
+      }
+      console.error('Error updating channel comments setting:', err);
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  });
+
+  // List comments for a message
+  app.get('/api/messages/:messageId/comments', isAuthenticated, async (req: any, res) => {
+    try {
+      const messageId = Number(req.params.messageId);
+      const userId = req.user.claims.sub as string;
+
+      const comments = await storage.listComments(messageId, userId);
+      res.json(comments);
+    } catch (err: any) {
+      if (err.message === 'Forbidden') return res.status(403).json({ message: err.message });
+      console.error('Error listing comments:', err);
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  });
+
+  // Add comment to a message
+  app.post('/api/messages/:messageId/comments', isAuthenticated, async (req: any, res) => {
+    try {
+      const messageId = Number(req.params.messageId);
+      const userId = req.user.claims.sub as string;
+      const { content } = req.body as { content: string };
+
+      if (!content || !content.trim()) {
+        return res.status(400).json({ message: 'Comment content cannot be empty' });
+      }
+
+      const comment = await storage.addComment(messageId, userId, content.trim());
+      res.status(201).json(comment);
+    } catch (err: any) {
+      if (err.message === 'Forbidden') return res.status(403).json({ message: err.message });
+      if (err.message === 'Comments are disabled for this channel') return res.status(403).json({ message: err.message });
+      if (err.message === 'Message not found' || err.message === 'Chat not found') {
+        return res.status(404).json({ message: err.message });
+      }
+      console.error('Error adding comment:', err);
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  });
+
+  // Edit comment
+  app.put('/api/messages/:messageId/comments/:commentId', isAuthenticated, async (req: any, res) => {
+    try {
+      const messageId = Number(req.params.messageId);
+      const commentId = Number(req.params.commentId);
+      const userId = req.user.claims.sub as string;
+      const { content } = req.body as { content: string };
+
+      if (!content || !content.trim()) {
+        return res.status(400).json({ message: 'Comment content cannot be empty' });
+      }
+
+      const comment = await storage.editComment(messageId, commentId, userId, content.trim());
+      res.json(comment);
+    } catch (err: any) {
+      if (err.message === 'Forbidden' || err.message === 'You can only edit your own comments') {
+        return res.status(403).json({ message: err.message });
+      }
+      if (err.message === 'Comment not found') {
+        return res.status(404).json({ message: err.message });
+      }
+      console.error('Error editing comment:', err);
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  });
+
+  // Delete comment
+  app.delete('/api/messages/:messageId/comments/:commentId', isAuthenticated, async (req: any, res) => {
+    try {
+      const messageId = Number(req.params.messageId);
+      const commentId = Number(req.params.commentId);
+      const userId = req.user.claims.sub as string;
+
+      await storage.deleteComment(messageId, commentId, userId);
+      res.json({ success: true });
+    } catch (err: any) {
+      if (err.message === 'Forbidden' || err.message === 'You can only delete your own comments') {
+        return res.status(403).json({ message: err.message });
+      }
+      if (err.message === 'Comment not found' || err.message === 'Message not found') {
+        return res.status(404).json({ message: err.message });
+      }
+      console.error('Error deleting comment:', err);
+      res.status(500).json({ message: 'Internal server error' });
     }
   });
 

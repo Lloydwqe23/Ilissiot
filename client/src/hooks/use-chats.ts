@@ -127,6 +127,62 @@ export function useCreateGroupChat() {
   });
 }
 
+export function useCreateChannel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ name }: { name: string }) => {
+      const res = await fetch(api.chats.createChannel.path, {
+        method: api.chats.createChannel.method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || "Failed to create channel");
+      }
+      return api.chats.createChannel.responses[201].parse(await res.json());
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.chats.list.path] });
+    },
+  });
+}
+
+export function useSearchChannels(query: string) {
+  return useQuery({
+    queryKey: ['channels.search', query],
+    queryFn: async () => {
+      if (!query.trim()) return [];
+      const res = await fetch(`/api/channels/search?q=${encodeURIComponent(query)}`, { credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to search channels');
+      return await res.json() as Array<{ id: number; name: string | null; avatarUrl: string | null; memberCount: number; isJoined: boolean }>;
+    },
+    enabled: !!query.trim(),
+  });
+}
+
+export function useJoinChannel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (chatId: number) => {
+      const res = await fetch(`/api/channels/${chatId}/join`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to join channel');
+      }
+      return await res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.chats.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.chats.get.path] });
+    },
+  });
+}
+
 export function useUpdateGroupChat() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -601,5 +657,135 @@ export function usePoll(pollId: number | null) {
       return await res.json();
     },
     enabled: !!pollId,
+  });
+}
+
+export function useChannelCommentsSetting() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ chatId, enabled }: { chatId: number; enabled: boolean }) => {
+      const res = await fetch(`/api/chats/${chatId}/comments-enabled`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to update comments setting');
+      }
+      return await res.json();
+    },
+    onMutate: async ({ chatId, enabled }) => {
+      await queryClient.cancelQueries({ queryKey: [api.chats.get.path, chatId] });
+      await queryClient.cancelQueries({ queryKey: [api.chats.list.path] });
+
+      const previousChat = queryClient.getQueryData<ChatResponse | null>([api.chats.get.path, chatId]);
+      const previousChats = queryClient.getQueryData<ChatResponse[]>([api.chats.list.path]);
+
+      queryClient.setQueryData<ChatResponse | null>([api.chats.get.path, chatId], (old) => {
+        if (!old) return old;
+        return { ...old, commentsEnabled: enabled };
+      });
+
+      queryClient.setQueryData<ChatResponse[]>([api.chats.list.path], (old) => {
+        if (!old) return old;
+        return old.map((chat) => (chat.id === chatId ? { ...chat, commentsEnabled: enabled } : chat));
+      });
+
+      return { previousChat, previousChats };
+    },
+    onError: (_err, { chatId }, context) => {
+      if (context?.previousChat !== undefined) {
+        queryClient.setQueryData([api.chats.get.path, chatId], context.previousChat);
+      }
+      if (context?.previousChats !== undefined) {
+        queryClient.setQueryData([api.chats.list.path], context.previousChats);
+      }
+    },
+    onSuccess: (_, { chatId }) => {
+      queryClient.invalidateQueries({ queryKey: [api.chats.get.path, chatId] });
+      queryClient.invalidateQueries({ queryKey: [api.chats.get.path] });
+      queryClient.invalidateQueries({ queryKey: [api.chats.list.path] });
+    },
+  });
+}
+
+export function useComments(messageId: number | null) {
+  return useQuery({
+    queryKey: ['comments', messageId],
+    queryFn: async () => {
+      if (!messageId) return [];
+      const res = await fetch(`/api/messages/${messageId}/comments`, {
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Failed to fetch comments');
+      return await res.json();
+    },
+    enabled: !!messageId,
+  });
+}
+
+export function useAddComment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ messageId, content }: { messageId: number; content: string }) => {
+      const res = await fetch(`/api/messages/${messageId}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to add comment');
+      }
+      return await res.json();
+    },
+    onSuccess: (_, { messageId }) => {
+      queryClient.invalidateQueries({ queryKey: ['comments', messageId] });
+    },
+  });
+}
+
+export function useDeleteComment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ messageId, commentId }: { messageId: number; commentId: number }) => {
+      const res = await fetch(`/api/messages/${messageId}/comments/${commentId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to delete comment');
+      }
+      return await res.json();
+    },
+    onSuccess: (_, { messageId }) => {
+      queryClient.invalidateQueries({ queryKey: ['comments', messageId] });
+    },
+  });
+}
+
+export function useEditComment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ messageId, commentId, content }: { messageId: number; commentId: number; content: string }) => {
+      const res = await fetch(`/api/messages/${messageId}/comments/${commentId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to edit comment');
+      }
+      return await res.json();
+    },
+    onSuccess: (_, { messageId }) => {
+      queryClient.invalidateQueries({ queryKey: ['comments', messageId] });
+    },
   });
 }

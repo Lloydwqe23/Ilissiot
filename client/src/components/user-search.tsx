@@ -1,12 +1,12 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { useSearchUsers } from "@/hooks/use-users";
-import { useCreateDirectChat, useCreateGroupChat } from "@/hooks/use-chats";
+import { useChats, useCreateChannel, useCreateDirectChat, useCreateGroupChat, useSearchChannels, useJoinChannel } from "@/hooks/use-chats";
 import { useToast } from "@/hooks/use-toast";
-import { Search, Loader2, UserPlus, MessageSquarePlus, Users, X, Check, ArrowLeft, ArrowRight } from "lucide-react";
+import { Search, Loader2, UserPlus, MessageSquarePlus, Users, X, Check, ArrowLeft, ArrowRight, Megaphone } from "lucide-react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { resolveLanguage, translate } from "@/lib/i18n";
@@ -26,25 +26,47 @@ export function UserSearch({ open, onOpenChange }: { open: boolean; onOpenChange
   const language = resolveLanguage(user?.language);
   const t = (key: string) => translate(language, key);
   const [query, setQuery] = useState("");
+  const [searchTarget, setSearchTarget] = useState<'users' | 'groups' | 'channels'>('users');
   const debouncedQuery = useDebounceValue(query, 300);
   const { data: users, isLoading } = useSearchUsers(debouncedQuery);
+  const { data: chats } = useChats();
   const createChat = useCreateDirectChat();
   const createGroup = useCreateGroupChat();
+  const createChannel = useCreateChannel();
+  const joinChannel = useJoinChannel();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
 
   // Group creation state
-  const [mode, setMode] = useState<'direct' | 'group-select' | 'group-name'>('direct');
+  const [mode, setMode] = useState<'direct' | 'group-select' | 'group-name' | 'channel-name'>('direct');
   const [selectedUsers, setSelectedUsers] = useState<Array<{ id: string; name: string; avatar: string | null }>>([]);
   const [groupName, setGroupName] = useState("");
+  const [channelName, setChannelName] = useState("");
+  const { data: channels = [], isLoading: channelsLoading } = useSearchChannels(mode === 'direct' && searchTarget === 'channels' ? debouncedQuery : '');
+  const isGroupSearch = mode === 'direct' && searchTarget === 'groups';
+  const isChannelSearch = mode === 'direct' && searchTarget === 'channels';
+
+  const matchedGroups = useMemo(() => {
+    const normalized = debouncedQuery.trim().toLowerCase();
+    if (!isGroupSearch || !normalized) return [];
+
+    return (chats ?? [])
+      .filter((chat) => !!chat.isGroup)
+      .filter((chat) => {
+        const groupName = (chat.name || '').toLowerCase();
+        return groupName.includes(normalized);
+      });
+  }, [chats, debouncedQuery, isGroupSearch]);
 
   // Reset state when dialog closes
   useEffect(() => {
     if (!open) {
       setQuery("");
+      setSearchTarget('users');
       setMode('direct');
       setSelectedUsers([]);
       setGroupName("");
+      setChannelName("");
     }
   }, [open]);
 
@@ -83,6 +105,45 @@ export function UserSearch({ open, onOpenChange }: { open: boolean; onOpenChange
         }
       }
     );
+  };
+
+  const handleCreateChannel = () => {
+    if (!channelName.trim()) return;
+    createChannel.mutate(
+      { name: channelName.trim() },
+      {
+        onSuccess: (chat) => {
+          onOpenChange(false);
+          setLocation(`/chat/${chat.id}`);
+        },
+        onError: (err) => {
+          toast({ title: t("usersearch.couldNotCreateChannel"), description: err.message, variant: "destructive" });
+        }
+      }
+    );
+  };
+
+  const handleOpenGroup = (chatId: number) => {
+    onOpenChange(false);
+    setLocation(`/chat/${chatId}`);
+  };
+
+  const handleOpenChannel = (channel: { id: number; isJoined: boolean }) => {
+    if (channel.isJoined) {
+      onOpenChange(false);
+      setLocation(`/chat/${channel.id}`);
+      return;
+    }
+
+    joinChannel.mutate(channel.id, {
+      onSuccess: (chat) => {
+        onOpenChange(false);
+        setLocation(`/chat/${chat.id}`);
+      },
+      onError: (err: any) => {
+        toast({ title: t("usersearch.couldNotJoinChannel"), description: err.message, variant: "destructive" });
+      },
+    });
   };
 
   // Group name step
@@ -139,6 +200,46 @@ export function UserSearch({ open, onOpenChange }: { open: boolean; onOpenChange
     );
   }
 
+  if (mode === 'channel-name') {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="sm:max-w-[425px] rounded-2xl p-0 overflow-hidden border-border/50 shadow-2xl" aria-describedby={undefined}>
+          <DialogHeader className="p-6 pb-4">
+            <DialogTitle className="text-xl font-display flex items-center gap-2">
+              <button onClick={() => setMode('direct')} className="hover:bg-muted rounded-full p-1 -ml-1 transition-colors">
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+              {t("usersearch.newChannel")}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="px-6 pb-4">
+            <Input
+              autoFocus
+              placeholder={t("usersearch.channelNamePlaceholder")}
+              value={channelName}
+              onChange={(e) => setChannelName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && channelName.trim()) handleCreateChannel(); }}
+              className="rounded-xl bg-muted/50 border-transparent focus:bg-background focus:border-primary transition-all h-11"
+            />
+            <p className="text-xs text-muted-foreground mt-2">{t("usersearch.channelMembersHint")}</p>
+          </div>
+
+          <div className="p-6 pt-2">
+            <Button
+              className="w-full rounded-xl h-11"
+              disabled={!channelName.trim() || createChannel.isPending}
+              onClick={handleCreateChannel}
+            >
+              {createChannel.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Megaphone className="w-4 h-4 mr-2" />}
+              {t("usersearch.createChannel")}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[425px] rounded-2xl p-0 overflow-hidden border-border/50 shadow-2xl" aria-describedby={undefined}>
@@ -175,6 +276,52 @@ export function UserSearch({ open, onOpenChange }: { open: boolean; onOpenChange
                 <p className="text-xs text-muted-foreground">{t("usersearch.createGroupChat")}</p>
               </div>
             </button>
+
+            <button
+              onClick={() => setMode('channel-name')}
+              className="mt-2 w-full flex items-center gap-3 p-3 rounded-xl hover:bg-muted/80 active:bg-muted transition-colors text-left group border border-dashed border-border"
+            >
+              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                <Megaphone className="w-5 h-5 text-primary" />
+              </div>
+              <div className="flex-1">
+                <p className="font-medium group-hover:text-primary transition-colors">{t("usersearch.newChannel")}</p>
+                <p className="text-xs text-muted-foreground">{t("usersearch.createChannelHint")}</p>
+              </div>
+            </button>
+
+            <div className="mt-3 grid grid-cols-3 gap-2 rounded-xl bg-muted/40 p-1">
+              <button
+                onClick={() => setSearchTarget('users')}
+                className={`h-9 rounded-lg text-sm font-medium transition-colors ${
+                  searchTarget === 'users'
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {t("usersearch.searchUsersTab")}
+              </button>
+              <button
+                onClick={() => setSearchTarget('groups')}
+                className={`h-9 rounded-lg text-sm font-medium transition-colors ${
+                  searchTarget === 'groups'
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {t("usersearch.searchGroupsTab")}
+              </button>
+              <button
+                onClick={() => setSearchTarget('channels')}
+                className={`h-9 rounded-lg text-sm font-medium transition-colors ${
+                  searchTarget === 'channels'
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {t("usersearch.searchChannelsTab")}
+              </button>
+            </div>
           </div>
         )}
 
@@ -197,7 +344,7 @@ export function UserSearch({ open, onOpenChange }: { open: boolean; onOpenChange
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input 
               autoFocus
-              placeholder={t("usersearch.searchByUsername")} 
+              placeholder={isGroupSearch ? t("usersearch.searchGroupsByName") : isChannelSearch ? t("usersearch.searchChannelsByName") : t("usersearch.searchByUsername")} 
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               className="pl-9 rounded-xl bg-muted/50 border-transparent focus:bg-background focus:border-primary transition-all h-11"
@@ -206,19 +353,79 @@ export function UserSearch({ open, onOpenChange }: { open: boolean; onOpenChange
         </div>
 
         <div className="h-[300px] overflow-y-auto px-2 pb-2 scrollbar-hide">
-          {isLoading && query.length > 0 ? (
+          {(isLoading && query.length > 0 && !isGroupSearch && !isChannelSearch) || (channelsLoading && query.length > 0 && isChannelSearch) ? (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
               <Loader2 className="w-6 h-6 animate-spin text-primary" />
-              <p className="text-sm">{t("usersearch.searchingUsers")}</p>
+              <p className="text-sm">{isChannelSearch ? t("usersearch.searchingChannels") : t("usersearch.searchingUsers")}</p>
             </div>
-          ) : query.length > 0 && users?.length === 0 ? (
+          ) : query.length > 0 && isGroupSearch && matchedGroups.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+              <p>{t("usersearch.noGroupsFoundMatching")} "{query}"</p>
+            </div>
+          ) : query.length > 0 && isChannelSearch && channels.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+              <p>{t("usersearch.noChannelsFoundMatching")} "{query}"</p>
+            </div>
+          ) : query.length > 0 && !isGroupSearch && users?.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
               <p>{t("usersearch.noUsersFoundMatching")} "{query}"</p>
             </div>
           ) : !query ? (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground/60 gap-4">
               <UserPlus className="w-12 h-12 opacity-20" />
-              <p className="text-sm">{t("usersearch.typeNameToSearch")}</p>
+              <p className="text-sm">{isGroupSearch ? t("usersearch.typeGroupNameToSearch") : isChannelSearch ? t("usersearch.typeChannelNameToSearch") : t("usersearch.typeNameToSearch")}</p>
+            </div>
+          ) : isGroupSearch ? (
+            <div className="space-y-1 p-2">
+              {matchedGroups.map(group => {
+                const displayName = group.name || `${t("group.defaultName")} #${group.id}`;
+                const initials = (displayName[0] || 'G').toUpperCase();
+
+                return (
+                  <button
+                    key={group.id}
+                    onClick={() => handleOpenGroup(group.id)}
+                    className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-muted/80 active:bg-muted transition-colors text-left group"
+                  >
+                    <Avatar className="w-10 h-10 border border-border/50">
+                      <AvatarImage src={group.avatarUrl || ""} />
+                      <AvatarFallback className="bg-primary/5 text-primary text-xs font-medium">{initials}</AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 overflow-hidden">
+                      <p className="font-medium truncate group-hover:text-primary transition-colors">{displayName}</p>
+                      <p className="text-xs text-muted-foreground truncate">{group.members.length} {t("chat.members")}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          ) : isChannelSearch ? (
+            <div className="space-y-1 p-2">
+              {channels.map((channel) => {
+                const displayName = channel.name || `${t("usersearch.channelDefaultName")} #${channel.id}`;
+                const initials = (displayName[0] || 'C').toUpperCase();
+
+                return (
+                  <button
+                    key={channel.id}
+                    onClick={() => handleOpenChannel(channel)}
+                    disabled={joinChannel.isPending}
+                    className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-muted/80 active:bg-muted transition-colors text-left group"
+                  >
+                    <Avatar className="w-10 h-10 border border-border/50">
+                      <AvatarImage src={channel.avatarUrl || ""} />
+                      <AvatarFallback className="bg-primary/5 text-primary text-xs font-medium">{initials}</AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 overflow-hidden">
+                      <p className="font-medium truncate group-hover:text-primary transition-colors">{displayName}</p>
+                      <p className="text-xs text-muted-foreground truncate">{channel.memberCount} {t("chat.members")}</p>
+                    </div>
+                    <span className={`text-xs font-medium px-2 py-1 rounded-full ${channel.isJoined ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
+                      {channel.isJoined ? t("usersearch.openChannel") : t("usersearch.joinChannel")}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           ) : (
             <div className="space-y-1 p-2">

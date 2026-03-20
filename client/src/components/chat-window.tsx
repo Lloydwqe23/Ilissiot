@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, useMemo, useCallback, ReactNode } from "react";
 import { format, isToday, isYesterday } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, CheckCircle2, Smile, Phone, Video, Mic, StopCircle, Ban, Search, Pencil, Check, Play, Pause, Download, Reply, Share2, FileText, FileSpreadsheet, FileType, File as FileIcon, Presentation, FileArchive, FileCode, Users, UserPlus, UserMinus, Crown, Maximize, ScreenShare, Pin, BarChart3, Link2, Paintbrush, Shield, CalendarDays, BellOff, Bell, ZoomIn, ZoomOut, RotateCcw, ChevronLeft, ChevronRight } from "lucide-react";
+import { Send, ArrowLeft, MoreVertical, Loader2, Paperclip, X, Trash2, CheckCircle2, Smile, Phone, Video, Mic, StopCircle, Ban, Search, Pencil, Check, Play, Pause, Download, Reply, Share2, FileText, FileSpreadsheet, FileType, File as FileIcon, Presentation, FileArchive, FileCode, Users, UserPlus, UserMinus, Crown, Maximize, ScreenShare, Pin, BarChart3, Link2, Paintbrush, Shield, CalendarDays, BellOff, Bell, ZoomIn, ZoomOut, RotateCcw, ChevronLeft, ChevronRight, MessageCircle, Eye } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { useChat, useChats, useBlockStatus, useBlockUser, useUnblockUser, useLeaveGroup, useAddGroupMembers, useRemoveGroupMember, useUpdateGroupChat, usePinMessage, useUnpinMessage, useCreateDirectChat } from "@/hooks/use-chats";
+import { useChat, useChats, useBlockStatus, useBlockUser, useUnblockUser, useLeaveGroup, useAddGroupMembers, useRemoveGroupMember, useUpdateGroupChat, usePinMessage, useUnpinMessage, useCreateDirectChat, useComments, useAddComment, useDeleteComment, useEditComment, useChannelCommentsSetting } from "@/hooks/use-chats";
 import { useMessages, useSendMessage, useMarkMessagesRead, useDeleteMessages, useEditMessage, useAddReaction, useRemoveReaction } from "@/hooks/use-messages";
 import { useUserStatus, formatLastSeen } from "@/hooks/use-user-status";
 import { useTypingUsers, useSendTyping } from "@/hooks/use-typing";
@@ -462,6 +462,49 @@ function linkifyText(text: string): ReactNode[] {
   );
 }
 
+type CommentMediaPayload = {
+  name: string;
+  url: string;
+  mimeType?: string;
+};
+
+const COMMENT_MEDIA_PREFIX = '__comment_media__:';
+
+function makeCommentMediaContent(name: string, url: string, mimeType?: string): string {
+  return `${COMMENT_MEDIA_PREFIX}${JSON.stringify({ name, url, mimeType } satisfies CommentMediaPayload)}`;
+}
+
+function parseCommentMediaContent(content: string | null | undefined): CommentMediaPayload | null {
+  if (!content || !content.startsWith(COMMENT_MEDIA_PREFIX)) return null;
+  try {
+    const parsed = JSON.parse(content.slice(COMMENT_MEDIA_PREFIX.length));
+    if (!parsed?.name || !parsed?.url) return null;
+    return {
+      name: String(parsed.name),
+      url: String(parsed.url),
+      mimeType: parsed.mimeType ? String(parsed.mimeType) : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function getCommentMediaKind(media: CommentMediaPayload): 'audio' | 'video' | 'image' | 'file' {
+  const mime = (media.mimeType || '').toLowerCase();
+  const ext = media.name.split('.').pop()?.toLowerCase() || '';
+
+  if (mime.startsWith('audio/') || (['mp3', 'wav', 'ogg', 'm4a', 'aac', 'webm'].includes(ext) && media.name.startsWith('audio-'))) {
+    return 'audio';
+  }
+  if (mime.startsWith('video/') || (['mp4', 'webm', 'mov', 'mkv'].includes(ext) && (media.name.startsWith('video-') || media.name.startsWith('screen-')))) {
+    return 'video';
+  }
+  if (mime.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) {
+    return 'image';
+  }
+  return 'file';
+}
+
 /** Group Info Dialog – shows member list with add/remove capabilities */
 function GroupInfoDialog({
   open,
@@ -580,6 +623,7 @@ function GroupInfoDialog({
 
   const myMembership = chat.members?.find((m: any) => m.userId === currentUserId);
   const isAdmin = myMembership?.role === 'admin';
+  const canViewMembersTab = !chat.isChannel || isAdmin;
   const myPerms = (myMembership?.permissions || {}) as Record<string, boolean>;
   const canEditInfo = isAdmin || myPerms.canEditInfo === true;
   const existingIds = new Set(chat.members?.map((m: any) => m.userId) || []);
@@ -661,6 +705,12 @@ function GroupInfoDialog({
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
+  useEffect(() => {
+    if (!canViewMembersTab && activeTab === 'members') {
+      setActiveTab('voice-video');
+    }
+  }, [canViewMembersTab, activeTab]);
+
   return (
     <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) { setAddMode(false); setSearchQuery(''); } }}>
       <DialogContent className="sm:max-w-[600px] max-h-[90vh] flex flex-col rounded-2xl p-0 overflow-hidden border-border/50 shadow-2xl">
@@ -728,23 +778,27 @@ function GroupInfoDialog({
                   {canEditInfo && <Pencil className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover/name:opacity-100 transition-opacity shrink-0" />}
                 </div>
               )}
-              <p className="text-sm text-muted-foreground font-normal">{chat.members?.length || 0} {t('chat.members').toLowerCase()}</p>
+              <p className="text-sm text-muted-foreground font-normal">
+                {canViewMembersTab ? `${chat.members?.length || 0} ${t('chat.members').toLowerCase()}` : t('usersearch.newChannel')}
+              </p>
             </div>
           </DialogTitle>
           <DialogDescription className="sr-only">{t('chat.groupInfoDescription')}</DialogDescription>
           
           {/* Tabs */}
           <div className="flex gap-1 mt-4 border-b border-border overflow-x-auto">
-            <button
-              onClick={() => setActiveTab('members')}
-              className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
-                activeTab === 'members'
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {t('chat.members')} ({chat.members?.length || 0})
-            </button>
+            {canViewMembersTab && (
+              <button
+                onClick={() => setActiveTab('members')}
+                className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
+                  activeTab === 'members'
+                    ? 'border-primary text-primary'
+                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {t('chat.members')} ({chat.members?.length || 0})
+              </button>
+            )}
             <button
               onClick={() => setActiveTab('voice-video')}
               className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
@@ -1222,6 +1276,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const recordedChunksRef = useRef<Blob[]>([]);
   const recordTimerRef = useRef<number | null>(null);
   const recordingCleanupRef = useRef<(() => void) | null>(null);
+  const recordingTargetRef = useRef<'chat' | 'comment'>('chat');
 
   // search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -1278,6 +1333,29 @@ export function ChatWindow({ chatId }: { chatId: number }) {
 
   // invite links dialog state
   const [inviteLinksOpen, setInviteLinksOpen] = useState(false);
+  const [channelSettingsOpen, setChannelSettingsOpen] = useState(false);
+
+  // comments dialog state
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [commentsMessage, setCommentsMessage] = useState<any | null>(null);
+  const [commentInput, setCommentInput] = useState("");
+  const [showCommentStickerPicker, setShowCommentStickerPicker] = useState(false);
+  const [commentStickerTab, setCommentStickerTab] = useState<'emoji' | 'gif'>('emoji');
+  const [selectedCommentCategory, setSelectedCommentCategory] = useState(0);
+  const [commentRecording, setCommentRecording] = useState(false);
+  const [commentRecordTime, setCommentRecordTime] = useState(0);
+  const [commentUploading, setCommentUploading] = useState(false);
+  const [commentGifSearchQuery, setCommentGifSearchQuery] = useState('');
+  const [commentGifResults, setCommentGifResults] = useState<any[]>([]);
+  const [commentGifLoading, setCommentGifLoading] = useState(false);
+  const [commentGifNextPos, setCommentGifNextPos] = useState<string | null>(null);
+  const [commentCounts, setCommentCounts] = useState<Record<number, number>>({});
+  const [commentSelectionMode, setCommentSelectionMode] = useState(false);
+  const [selectedComments, setSelectedComments] = useState<Set<number>>(new Set());
+  const [replyToComment, setReplyToComment] = useState<{ id: number; senderName: string; content: string } | null>(null);
+  const [editingCommentId, setEditingCommentId] = useState<number | null>(null);
+  const [commentReactions, setCommentReactions] = useState<Record<number, string[]>>({});
+  const [showCompactPostJump, setShowCompactPostJump] = useState(false);
 
   // background picker state
   const [bgPickerOpen, setBgPickerOpen] = useState(false);
@@ -1335,6 +1413,43 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   // pin message mutation
   const pinMessage = usePinMessage();
   const unpinMessage = useUnpinMessage();
+  const channelCommentsSetting = useChannelCommentsSetting();
+  const addComment = useAddComment();
+  const deleteComment = useDeleteComment();
+  const editComment = useEditComment();
+  const { data: comments = [] } = useComments(commentsMessage?.id || null);
+
+  useEffect(() => {
+    if (!messages?.length) {
+      setCommentCounts({});
+      return;
+    }
+
+    let active = true;
+    const loadCommentCounts = async () => {
+      const pairs = await Promise.all(
+        messages.map(async (m) => {
+          try {
+            const res = await fetch(`/api/messages/${m.id}/comments`, { credentials: 'include' });
+            if (!res.ok) return [m.id, 0] as const;
+            const data = await res.json();
+            return [m.id, Array.isArray(data) ? data.length : 0] as const;
+          } catch {
+            return [m.id, 0] as const;
+          }
+        })
+      );
+
+      if (active) {
+        setCommentCounts(Object.fromEntries(pairs));
+      }
+    };
+
+    loadCommentCounts();
+    return () => {
+      active = false;
+    };
+  }, [messages]);
 
   // Calculate all text matches in messages (for navigation)
   const allMatches = (() => {
@@ -1614,6 +1729,12 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const [selectedMessages, setSelectedMessages] = useState<Set<number>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const commentFileInputRef = useRef<HTMLInputElement>(null);
+  const commentTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const commentStickerPickerRef = useRef<HTMLDivElement>(null);
+  const commentEmojiGridRef = useRef<HTMLDivElement>(null);
+  const commentGifScrollRef = useRef<HTMLDivElement>(null);
+  const commentsScrollRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1805,15 +1926,115 @@ export function ChatWindow({ chatId }: { chatId: number }) {
     }
   };
 
+  const fetchCommentGifs = async (query: string, append = false) => {
+    setCommentGifLoading(true);
+    try {
+      const TENOR_KEY = 'AIzaSyAyimkuYQYF_FXVALexPuGQctUWRURdCYQ';
+      let endpoint = query.trim()
+        ? `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(query)}&key=${TENOR_KEY}&limit=20&media_filter=mp4,tinygif,nanogif`
+        : `https://tenor.googleapis.com/v2/featured?key=${TENOR_KEY}&limit=20&media_filter=mp4,tinygif,nanogif`;
+      if (append && commentGifNextPos) {
+        endpoint += `&pos=${commentGifNextPos}`;
+      }
+
+      const res = await fetch(endpoint);
+      if (!res.ok) throw new Error('Comment GIF fetch failed');
+      const data = await res.json();
+      const results = (data.results || []).map((r: any) => ({
+        id: r.id,
+        title: r.title || '',
+        url: r.media_formats?.mp4?.url || r.media_formats?.tinygif?.url || '',
+        preview: r.media_formats?.nanogif?.url || r.media_formats?.tinygif?.url || '',
+        mp4: r.media_formats?.mp4?.url || '',
+      }));
+
+      setCommentGifNextPos(data.next || null);
+      if (append) {
+        setCommentGifResults(prev => {
+          const existingIds = new Set(prev.map((g: any) => g.id));
+          const newItems = results.filter((r: any) => !existingIds.has(r.id));
+          return [...prev, ...newItems];
+        });
+      } else {
+        setCommentGifResults(results);
+      }
+    } catch (err) {
+      console.error('Comment GIF search error:', err);
+      if (!append) setCommentGifResults([]);
+    } finally {
+      setCommentGifLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (showCommentStickerPicker && commentStickerTab === 'gif' && commentGifResults.length === 0 && !commentGifSearchQuery.trim()) {
+      fetchCommentGifs('');
+    }
+  }, [showCommentStickerPicker, commentStickerTab]);
+
+  useEffect(() => {
+    if (commentStickerTab !== 'gif' || !showCommentStickerPicker) return;
+    const timer = setTimeout(() => {
+      setCommentGifNextPos(null);
+      fetchCommentGifs(commentGifSearchQuery);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [commentGifSearchQuery, commentStickerTab, showCommentStickerPicker]);
+
+  const handleCommentGifScroll = () => {
+    const el = commentGifScrollRef.current;
+    if (!el || commentGifLoading || !commentGifNextPos) return;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 50) {
+      fetchCommentGifs(commentGifSearchQuery, true);
+    }
+  };
+
+  const toggleCommentSelection = (commentId: number) => {
+    setSelectedComments((prev) => {
+      const next = new Set(prev);
+      if (next.has(commentId)) next.delete(commentId);
+      else next.add(commentId);
+      return next;
+    });
+  };
+
+  const clearCommentSelection = () => {
+    setCommentSelectionMode(false);
+    setSelectedComments(new Set());
+  };
+
+  const scrollCommentsToTop = () => {
+    commentsScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleCommentsScroll = () => {
+    const el = commentsScrollRef.current;
+    if (!el) return;
+    setShowCompactPostJump(el.scrollTop > 120);
+  };
+
+  const deleteSelectedComments = async () => {
+    if (!commentsMessage || selectedComments.size === 0) return;
+    const selectedList = comments.filter((c: any) => selectedComments.has(c.id));
+    await Promise.all(
+      selectedList
+        .filter((c: any) => c.senderId === user?.id || isChannelAdmin)
+        .map((c: any) => deleteComment.mutateAsync({ messageId: commentsMessage.id, commentId: c.id }))
+    );
+    clearCommentSelection();
+  };
+
   const handleSend = (e?: React.FormEvent) => {
     e?.preventDefault();
-    
+
+    if (!canPostInChannel) return;
+
     // If we're editing, save the edit instead
     if (editingMessageId) {
       saveEditedMessage();
       return;
     }
-    
+
     if (!inputValue.trim() && attachments.length === 0) return;
 
     // Build attachments with reply info if replying
@@ -1866,6 +2087,40 @@ export function ChatWindow({ chatId }: { chatId: number }) {
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleCommentFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || !commentsMessage) return;
+
+    setCommentUploading(true);
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData,
+          credentials: 'include',
+        });
+
+        if (!response.ok) throw new Error('Upload failed');
+
+        const data = await response.json();
+        await addComment.mutateAsync({
+          messageId: commentsMessage.id,
+          content: makeCommentMediaContent(data.name, data.url, data.type),
+        });
+      }
+    } catch (err) {
+      console.error('Comment upload error:', err);
+      alert('Failed to upload file to comments');
+    } finally {
+      setCommentUploading(false);
+      if (commentFileInputRef.current) commentFileInputRef.current.value = '';
     }
   };
 
@@ -1991,7 +2246,12 @@ export function ChatWindow({ chatId }: { chatId: number }) {
     };
   };
 
-  const startRecording = async (type: RecordingType = 'audio', screenOptions?: ScreenRecordingOptions) => {
+  const startRecording = async (
+    type: RecordingType = 'audio',
+    screenOptions?: ScreenRecordingOptions,
+    target: 'chat' | 'comment' = 'chat'
+  ) => {
+    recordingTargetRef.current = target;
     try {
       let stream: MediaStream;
       let displayStream: MediaStream | null = null;
@@ -2141,7 +2401,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
         console.log(`[Recording] File created: ${file.name}, MIME: ${file.type}, preparing to upload`);
         console.log(`[Recording] Current chatId: ${chatId}`);
         try {
-          await uploadAndSendMedia(file);
+          await uploadAndSendMedia(file, target);
           console.log('[Recording] Upload and send completed');
         } catch (error) {
           console.error('[Recording] Upload and send failed:', error);
@@ -2149,9 +2409,10 @@ export function ChatWindow({ chatId }: { chatId: number }) {
         }
       };
 
-      recorder.onerror = (ev: MediaRecorderErrorEvent) => {
-        console.error('Recording error:', ev.error);
-        alert(`Recording error: ${ev.error}`);
+      recorder.onerror = (ev: Event) => {
+        const maybeError = (ev as any)?.error;
+        console.error('Recording error:', maybeError ?? ev);
+        alert(`Recording error: ${maybeError || 'Unknown media recorder error'}`);
         setRecording(false);
         setRecordingType(null);
         stream.getTracks().forEach(t => t.stop());
@@ -2199,9 +2460,13 @@ export function ChatWindow({ chatId }: { chatId: number }) {
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  const uploadAndSendMedia = async (file: File) => {
+  const uploadAndSendMedia = async (file: File, target: 'chat' | 'comment' = 'chat') => {
     console.log(`[Upload] Starting upload for file: ${file.name}`);
-    setUploading(true);
+    if (target === 'comment') {
+      setCommentUploading(true);
+    } else {
+      setUploading(true);
+    }
     try {
       const formData = new FormData();
       formData.append('file', file);
@@ -2217,6 +2482,16 @@ export function ChatWindow({ chatId }: { chatId: number }) {
       
       const data = await response.json();
       console.log(`[Upload] Upload successful, got URL: ${data.url}`);
+      if (target === 'comment' && commentsMessage) {
+        console.log(`[Upload] Sending media to comments for messageId: ${commentsMessage.id}`);
+        await addComment.mutateAsync({
+          messageId: commentsMessage.id,
+          content: makeCommentMediaContent(data.name, data.url, data.type),
+        });
+        recordedChunksRef.current = [];
+        return;
+      }
+
       console.log(`[Upload] Sending message to chatId: ${chatId}`);
       
       const attachment = { name: data.name, url: data.url, type: data.type };
@@ -2240,7 +2515,11 @@ export function ChatWindow({ chatId }: { chatId: number }) {
       throw err;
     } finally {
       console.log('[Upload] Setting uploading to false');
-      setUploading(false);
+      if (target === 'comment') {
+        setCommentUploading(false);
+      } else {
+        setUploading(false);
+      }
     }
   };
 
@@ -2353,6 +2632,9 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   };
 
   const { data: blockStatus } = useBlockStatus(otherMember?.userId);
+  const isChannelAdmin = !!(chat?.isChannel && chat.members?.some((m: any) => m.userId === user?.id && m.role === 'admin'));
+  const canPostInChannel = !chat?.isChannel || chat.members?.some((m: any) => m.userId === user?.id && m.role === 'admin');
+  const commentsAllowed = !chat?.isChannel || chat.commentsEnabled !== false;
   const blockMut = useBlockUser();
   const unblockMut = useUnblockUser();
 
@@ -2658,15 +2940,26 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                   <DropdownMenuSeparator />
                   {chat?.isGroup && (
                     <>
-                      <DropdownMenuItem onClick={() => setCreatePollOpen(true)}>
-                        <BarChart3 className="w-4 h-4 mr-2" />
-                        {t('chat.createPoll')}
-                      </DropdownMenuItem>
-                      {chat?.members.find(m => m.userId === user?.id)?.role === 'admin' && (
-                        <DropdownMenuItem onClick={() => setInviteLinksOpen(true)}>
-                          <Link2 className="w-4 h-4 mr-2" />
-                          {t('chat.inviteLinks')}
-                        </DropdownMenuItem>
+                      {chat?.isChannel ? (
+                        isChannelAdmin && (
+                          <DropdownMenuItem onClick={() => setChannelSettingsOpen(true)}>
+                            <Shield className="w-4 h-4 mr-2" />
+                            {t('chat.channelSettings')}
+                          </DropdownMenuItem>
+                        )
+                      ) : (
+                        <>
+                          <DropdownMenuItem onClick={() => setCreatePollOpen(true)}>
+                            <BarChart3 className="w-4 h-4 mr-2" />
+                            {t('chat.createPoll')}
+                          </DropdownMenuItem>
+                          {chat?.members.find(m => m.userId === user?.id)?.role === 'admin' && (
+                            <DropdownMenuItem onClick={() => setInviteLinksOpen(true)}>
+                              <Link2 className="w-4 h-4 mr-2" />
+                              {t('chat.inviteLinks')}
+                            </DropdownMenuItem>
+                          )}
+                        </>
                       )}
                       <DropdownMenuSeparator />
                     </>
@@ -2849,6 +3142,9 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                 const isSelected = selectedMessages.has(msg.id);
                 const isCurrentMatch = isSearching && allMatches.length > 0 && allMatches[currentMatchIndex]?.messageId === msg.id;
                 const hasMatch = isSearching && allMatches.some(m => m.messageId === msg.id);
+                const seenCount = chat?.isChannel
+                  ? (msg.isRead ? Math.max((chat.members?.length || 1) - 1, 0) : 0)
+                  : 0;
                 const currentMsgDate = new Date(msg.createdAt!);
                 const previousMsgDate = messages[idx - 1]?.createdAt ? new Date(String(messages[idx - 1].createdAt)) : null;
                 const showDateDivider = !previousMsgDate || currentMsgDate.toDateString() !== previousMsgDate.toDateString();
@@ -3119,6 +3415,30 @@ export function ChatWindow({ chatId }: { chatId: number }) {
                           });
                         })()}
 
+                        {commentsAllowed && (
+                          <button
+                            onClick={() => {
+                              setCommentsMessage(msg);
+                              setCommentInput('');
+                              setCommentsOpen(true);
+                            }}
+                            className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
+                              isMine
+                                ? 'bg-foreground/10 text-primary-foreground/70 hover:bg-foreground/20'
+                                : 'bg-muted/50 text-muted-foreground hover:bg-muted'
+                            }`}
+                          >
+                            <MessageCircle className="w-3 h-3" />
+                            <span>{t('comments.open')} ({commentCounts[msg.id] ?? 0})</span>
+                            {chat?.isChannel && (
+                              <span className="inline-flex items-center gap-1 ml-1">
+                                <Eye className="w-3 h-3" />
+                                <span>{seenCount}</span>
+                              </span>
+                            )}
+                          </button>
+                        )}
+
                         {/* Add reaction button removed - use right-click context menu instead */}
                       </div>
                     </div>
@@ -3234,6 +3554,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
       )}
 
       {/* Input Area */}
+        {canPostInChannel && (
       <div className="p-4 bg-background/80 backdrop-blur-md border-t border-border/50 shrink-0">
         {blockStatus?.blockedBy ? (
           <div className="max-w-4xl mx-auto flex items-center justify-center gap-2 py-3 text-muted-foreground">
@@ -3581,6 +3902,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
         </form>
         )}
       </div>
+      )}
 
       {/* Delete confirmation dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={(open) => {
@@ -3735,6 +4057,696 @@ export function ChatWindow({ chatId }: { chatId: number }) {
             {allChats && allChats.length === 0 && (
               <p className="text-sm text-muted-foreground text-center py-4">{t("chat.noChatsFound")}</p>
             )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Comments page - Full chat interface */}
+      {commentsOpen && commentsMessage && (
+        <div className="fixed inset-0 z-40 bg-background flex flex-col">
+          <div className="h-14 border-b border-border/50 px-3 flex items-center gap-2 shrink-0">
+            <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full" onClick={() => setCommentsOpen(false)}>
+              <ArrowLeft className="w-5 h-5" />
+            </Button>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold leading-tight">{t('comments.title')}</p>
+              <p className="text-xs text-muted-foreground truncate">
+                {commentsMessage.senderName || commentsMessage.sender?.firstName || 'Post'}
+              </p>
+            </div>
+          </div>
+
+          {showCompactPostJump && (
+            <div className="px-3 py-1.5 border-b border-border/50 bg-background/95 backdrop-blur-md shrink-0">
+              <button
+                type="button"
+                onClick={scrollCommentsToTop}
+                className="w-full text-left text-xs font-medium text-primary hover:underline"
+              >
+                Post preview • tap to jump to top
+              </button>
+            </div>
+          )}
+
+          <div ref={commentsScrollRef} onScroll={handleCommentsScroll} className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="rounded-xl border border-border/50 bg-muted/30 px-3 py-2.5">
+              <p className="text-xs text-muted-foreground mb-2">Post</p>
+              <div className="rounded-xl border border-border/50 bg-background/90 px-3 py-2.5">
+                {commentsMessage.content && (
+                  <p className="text-sm break-words text-foreground/90">{commentsMessage.content}</p>
+                )}
+                {(commentsMessage as any).attachments?.length > 0 && (
+                  <div className={commentsMessage.content ? 'mt-2' : ''}>
+                    {renderAttachments(commentsMessage, false)}
+                  </div>
+                )}
+                {!commentsMessage.content && !((commentsMessage as any).attachments?.length > 0) && (
+                  <p className="text-sm text-muted-foreground">Attachment</p>
+                )}
+              </div>
+            </div>
+
+            {commentSelectionMode && (
+              <div className="sticky top-0 z-20 mb-2 rounded-xl border border-border/60 bg-background/95 backdrop-blur px-3 py-2 flex items-center justify-between">
+                <p className="text-sm text-foreground/90">Selected: {selectedComments.size}</p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={selectedComments.size !== 1 || !comments.some((c: any) => selectedComments.has(c.id) && c.senderId === user?.id)}
+                    onClick={() => {
+                      const selected = comments.find((c: any) => selectedComments.has(c.id));
+                      if (!selected || selected.senderId !== user?.id) return;
+                      setEditingCommentId(selected.id);
+                      setCommentInput(selected.content || '');
+                      setCommentSelectionMode(false);
+                      setSelectedComments(new Set());
+                    }}
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    disabled={selectedComments.size === 0}
+                    onClick={deleteSelectedComments}
+                  >
+                    Delete
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={clearCommentSelection}>Cancel</Button>
+                </div>
+              </div>
+            )}
+            {comments.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-10">{t('comments.empty')}</p>
+            ) : (
+              comments.map((c: any) => {
+                const mine = c.senderId === user?.id;
+                const media = parseCommentMediaContent(c.content);
+                const isSelected = selectedComments.has(c.id);
+                return (
+                  <ContextMenu key={c.id}>
+                    <ContextMenuTrigger asChild>
+                      <div className={`flex items-end gap-2 ${mine ? 'justify-end' : 'justify-start'} cursor-pointer`}>
+                    {/* Avatar for others */}
+                    {!mine && (
+                      <div className="w-8 shrink-0 flex justify-center">
+                        <Avatar
+                          className="w-8 h-8 border border-border/50 shadow-sm cursor-pointer hover:opacity-80 transition-opacity"
+                          onClick={() => {
+                            setProfileUser(c.sender);
+                            setProfileModalOpen(true);
+                          }}
+                        >
+                          <AvatarImage src={c.sender?.profileImageUrl || ""} />
+                          <AvatarFallback className="text-[10px] bg-primary/10 text-primary">
+                            {c.sender?.firstName?.[0] || 'U'}
+                          </AvatarFallback>
+                        </Avatar>
+                      </div>
+                    )}
+
+                    <div className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
+                      {/* Sender name - clickable */}
+                      {!mine && (
+                        <p
+                          className="text-[12px] font-semibold text-primary mb-1 ml-2 cursor-pointer hover:underline"
+                          onClick={() => {
+                            setCommentSelectionMode(false);
+                            setSelectedComments(new Set());
+                            setProfileUser(c.sender);
+                            setProfileModalOpen(true);
+                          }}
+                        >
+                          {c.sender?.firstName || 'User'}
+                        </p>
+                      )}
+
+                      <div
+                        onClick={() => {
+                          if (commentSelectionMode) toggleCommentSelection(c.id);
+                        }}
+                        className={`group relative px-4 py-2.5 shadow-sm ${
+                          mine
+                            ? 'bg-primary text-primary-foreground rounded-2xl rounded-br-sm'
+                            : 'bg-card text-card-foreground rounded-2xl rounded-bl-sm border border-border/50'
+                        } ${isSelected ? 'ring-2 ring-primary/60' : ''}`}
+                      >
+                        {media ? (
+                          <div className="space-y-2 min-w-[220px] max-w-[420px]">
+                            {getCommentMediaKind(media) === 'audio' && (
+                              <AudioMessage url={media.url} name={media.name} isMine={mine} />
+                            )}
+                            {getCommentMediaKind(media) === 'video' && (
+                              <VideoMessage url={media.url} name={media.name} isMine={mine} />
+                            )}
+                            {getCommentMediaKind(media) === 'image' && (
+                              <a href={media.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+                                <img
+                                  src={media.url}
+                                  alt={media.name}
+                                  className="max-h-72 w-full rounded-lg object-cover border border-border/40"
+                                />
+                              </a>
+                            )}
+                            {getCommentMediaKind(media) === 'file' && (
+                              <a
+                                href={media.url}
+                                download={media.name}
+                                onClick={(e) => e.stopPropagation()}
+                                className={`flex items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${mine ? 'border-white/25 bg-white/10 hover:bg-white/15' : 'border-border/60 bg-muted/40 hover:bg-muted/60'}`}
+                              >
+                                {getFileIcon(media.name, media.mimeType)}
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-xs font-medium truncate">{media.name}</p>
+                                  <p className={`text-[10px] ${mine ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
+                                    {getFileLabel(media.name)}
+                                  </p>
+                                </div>
+                                <Download className="w-3.5 h-3.5 shrink-0" />
+                              </a>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-sm break-words">{c.content}</p>
+                        )}
+                      </div>
+
+                      {commentReactions[c.id]?.length ? (
+                        <div className={`mt-1 flex flex-wrap gap-1 ${mine ? 'justify-end' : 'justify-start'}`}>
+                          {Array.from(new Set(commentReactions[c.id])).map((emoji) => (
+                            <span key={`${c.id}-${emoji}`} className="text-xs rounded-full border border-border/60 px-2 py-0.5 bg-muted/50">
+                              {emoji} {commentReactions[c.id].filter((e) => e === emoji).length}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {/* Avatar for mine */}
+                    {mine && (
+                      <div className="w-8 shrink-0 flex justify-center">
+                        <Avatar className="w-8 h-8 border border-border/50 shadow-sm">
+                          <AvatarImage src={user?.profileImageUrl || ""} />
+                          <AvatarFallback className="text-[10px] bg-primary/10 text-primary">
+                            {user?.firstName?.[0] || 'Y'}
+                          </AvatarFallback>
+                        </Avatar>
+                      </div>
+                    )}
+                      </div>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent className="w-48">
+                      <ContextMenuItem onClick={() => {
+                        setReplyToComment({
+                          id: c.id,
+                          senderName: c.sender?.firstName || 'User',
+                          content: media ? `[${media.name}]` : (c.content || ''),
+                        });
+                        commentTextareaRef.current?.focus();
+                      }}>
+                        <Reply className="w-4 h-4 mr-2" />
+                        {t('message.reply')}
+                      </ContextMenuItem>
+                      <ContextMenuItem onClick={() => {
+                        setForwardMessage({
+                          id: c.id,
+                          senderName: c.sender?.firstName || 'User',
+                          content: media ? '' : (c.content || ''),
+                          attachments: media ? [{ name: media.name, url: media.url, type: media.mimeType || 'application/octet-stream' }] : [],
+                        });
+                        setForwardSearchQuery('');
+                        setForwardDialogOpen(true);
+                      }}>
+                        <Share2 className="w-4 h-4 mr-2" />
+                        {t('message.forward')}
+                      </ContextMenuItem>
+                      <ContextMenuItem onClick={() => {
+                        setCommentSelectionMode(true);
+                        toggleCommentSelection(c.id);
+                      }}>
+                        <CheckCircle2 className="w-4 h-4 mr-2" />
+                        {t('message.select')}
+                      </ContextMenuItem>
+                      <ContextMenuSeparator />
+                      <ContextMenuSub>
+                        <ContextMenuSubTrigger>
+                          <Smile className="w-4 h-4 mr-2" />
+                          {t('message.react')}
+                        </ContextMenuSubTrigger>
+                        <ContextMenuSubContent className="p-0 w-64">
+                          <div className="flex border-b border-border/50">
+                            {EMOJI_CATEGORIES.map((cat, idx) => (
+                              <button
+                                key={idx}
+                                onClick={() => setSelectedCommentCategory(idx)}
+                                className={`flex-1 py-2 text-center transition-colors ${selectedCommentCategory === idx
+                                  ? 'bg-muted text-foreground'
+                                  : 'hover:bg-muted/50 text-muted-foreground'
+                                }`}
+                                title={cat.title}
+                              >
+                                {cat.icon}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="p-2 bg-card/50 grid grid-cols-6 gap-1 max-h-48 overflow-y-auto">
+                            {EMOJI_CATEGORIES[selectedCommentCategory].items.map((emoji, i) => (
+                              <button
+                                key={i}
+                                onClick={() => {
+                                  setCommentReactions((prev) => {
+                                    const arr = prev[c.id] || [];
+                                    return { ...prev, [c.id]: [...arr, emoji] };
+                                  });
+                                }}
+                                className="flex items-center justify-center text-2xl hover:bg-muted rounded transition-colors p-1"
+                              >
+                                {emoji}
+                              </button>
+                            ))}
+                          </div>
+                        </ContextMenuSubContent>
+                      </ContextMenuSub>
+                      {(mine || isChannelAdmin) && (
+                        <>
+                          <ContextMenuSeparator />
+                          {mine && (
+                            <ContextMenuItem onClick={() => {
+                              setEditingCommentId(c.id);
+                              setCommentInput(c.content || '');
+                              commentTextareaRef.current?.focus();
+                            }}>
+                              <Pencil className="w-4 h-4 mr-2" />
+                              {t('message.edit')}
+                            </ContextMenuItem>
+                          )}
+                          <ContextMenuItem onClick={() => deleteComment.mutate({ messageId: commentsMessage.id, commentId: c.id })}>
+                            <Trash2 className="w-4 h-4 mr-2" />
+                            {t('message.delete')}
+                          </ContextMenuItem>
+                        </>
+                      )}
+                    </ContextMenuContent>
+                  </ContextMenu>
+                );
+              })
+            )}
+          </div>
+
+          {/* Comments input area - with full chat features */}
+          <div className="p-4 bg-background/80 backdrop-blur-md border-t border-border/50 shrink-0">
+            {commentsAllowed ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!commentsMessage || !commentInput.trim()) return;
+                  if (editingCommentId) {
+                    editComment.mutate(
+                      { messageId: commentsMessage.id, commentId: editingCommentId, content: commentInput.trim() },
+                      {
+                        onSuccess: () => {
+                          setCommentInput('');
+                          setEditingCommentId(null);
+                        },
+                      }
+                    );
+                    return;
+                  }
+
+                  const content = replyToComment
+                    ? `↪ ${replyToComment.senderName}: ${replyToComment.content}\n${commentInput.trim()}`
+                    : commentInput.trim();
+                  addComment.mutate(
+                    { messageId: commentsMessage.id, content },
+                    {
+                      onSuccess: () => {
+                        setCommentInput('');
+                        setReplyToComment(null);
+                      },
+                    }
+                  );
+                }}
+                className="space-y-2"
+              >
+                {replyToComment && (
+                  <div className="flex items-start justify-between gap-2 rounded-lg border border-border/50 bg-muted/30 px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-primary">Replying to {replyToComment.senderName}</p>
+                      <p className="text-xs text-muted-foreground truncate">{replyToComment.content}</p>
+                    </div>
+                    <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={() => setReplyToComment(null)}>
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+                )}
+                {editingCommentId && (
+                  <div className="flex items-start justify-between gap-2 rounded-lg border border-border/50 bg-amber-500/10 px-3 py-2">
+                    <p className="text-xs font-semibold text-amber-700 dark:text-amber-300">Editing comment</p>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => {
+                        setEditingCommentId(null);
+                        setCommentInput('');
+                      }}
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+                )}
+                <div className="relative flex items-end gap-2">
+                  <div className="flex-1 bg-card border border-border/50 rounded-2xl shadow-sm focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all flex items-center p-1.5">
+                    <textarea
+                      ref={commentTextareaRef}
+                      value={commentInput}
+                      onChange={(e) => setCommentInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          if (commentInput.trim()) {
+                            if (editingCommentId) {
+                              editComment.mutate(
+                                { messageId: commentsMessage.id, commentId: editingCommentId, content: commentInput.trim() },
+                                {
+                                  onSuccess: () => {
+                                    setCommentInput('');
+                                    setEditingCommentId(null);
+                                  },
+                                }
+                              );
+                            } else {
+                              const content = replyToComment
+                                ? `↪ ${replyToComment.senderName}: ${replyToComment.content}\n${commentInput.trim()}`
+                                : commentInput.trim();
+                              addComment.mutate(
+                                { messageId: commentsMessage.id, content },
+                                {
+                                  onSuccess: () => {
+                                    setCommentInput('');
+                                    setReplyToComment(null);
+                                  },
+                                }
+                              );
+                            }
+                          }
+                        }
+                      }}
+                      placeholder={t('comments.placeholder')}
+                      className="w-full max-h-32 min-h-[44px] bg-transparent resize-none border-0 outline-none focus:ring-0 focus:outline-none text-[15px] py-2.5 px-3 scrollbar-hide"
+                      rows={1}
+                    />
+                  </div>
+
+                  {/* Emoji picker button */}
+                  <div className="relative" ref={commentStickerPickerRef}>
+                    <button
+                      type="button"
+                      onClick={() => setShowCommentStickerPicker(v => !v)}
+                      className="h-12 w-12 rounded-full shrink-0 flex items-center justify-center bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors"
+                    >
+                      <Smile className="w-5 h-5" />
+                    </button>
+                    {showCommentStickerPicker && (
+                      <div className="absolute bottom-full mb-2 right-0 w-[340px] max-w-[calc(100vw-2rem)] max-h-[min(360px,60dvh)] bg-card border border-border/50 rounded-xl shadow-xl z-50 flex flex-col overflow-hidden">
+                        <div className="flex border-b border-border/50">
+                          <button
+                            type="button"
+                            className={`flex-1 py-2 text-center text-sm font-medium transition-colors ${commentStickerTab === 'emoji' ? 'bg-muted text-foreground border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                            onClick={() => setCommentStickerTab('emoji')}
+                          >
+                            😀 Emoji
+                          </button>
+                          <button
+                            type="button"
+                            className={`flex-1 py-2 text-center text-sm font-medium transition-colors ${commentStickerTab === 'gif' ? 'bg-muted text-foreground border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                            onClick={() => setCommentStickerTab('gif')}
+                          >
+                            GIF
+                          </button>
+                        </div>
+
+                        {commentStickerTab === 'emoji' ? (
+                          <>
+                            <div className="px-3 pt-2.5 pb-1">
+                              <span className="text-xs font-semibold text-muted-foreground">{EMOJI_CATEGORIES[selectedCommentCategory].title}</span>
+                            </div>
+                            <div ref={commentEmojiGridRef} className="px-2 pb-1 overflow-y-auto flex-1 min-h-0" style={{ maxHeight: '220px' }}>
+                              <div className="grid grid-cols-8 gap-0.5">
+                                {EMOJI_CATEGORIES[selectedCommentCategory].items.map((emoji, i) => (
+                                  <button
+                                    key={`${selectedCommentCategory}-${i}`}
+                                    type="button"
+                                    className="w-9 h-9 flex items-center justify-center text-[22px] rounded-lg hover:bg-accent transition-colors"
+                                    onClick={() => {
+                                      setCommentInput(prev => prev + emoji);
+                                      setShowCommentStickerPicker(false);
+                                    }}
+                                  >
+                                    {emoji}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-around border-t border-border/50 px-1 py-1.5 bg-accent/30">
+                              {EMOJI_CATEGORIES.map((cat, idx) => (
+                                <button
+                                  key={cat.title}
+                                  type="button"
+                                  title={cat.title}
+                                  className={`w-8 h-8 flex items-center justify-center text-lg rounded-lg transition-colors ${
+                                    selectedCommentCategory === idx ? 'bg-primary/15 scale-110' : 'hover:bg-accent opacity-70 hover:opacity-100'
+                                  }`}
+                                  onClick={() => {
+                                    setSelectedCommentCategory(idx);
+                                    commentEmojiGridRef.current?.scrollTo(0, 0);
+                                  }}
+                                >
+                                  {cat.icon}
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="px-3 py-1.5 border-b border-border/50">
+                              <input
+                                type="text"
+                                placeholder="Search GIFs..."
+                                value={commentGifSearchQuery}
+                                onChange={(e) => {
+                                  setCommentGifSearchQuery(e.target.value);
+                                  // GIF search would be fetched here
+                                }}
+                                className="w-full px-3 py-1.5 text-sm bg-muted rounded-lg border-0 outline-none focus:ring-1 focus:ring-primary"
+                                autoFocus
+                              />
+                            </div>
+                            <div ref={commentGifScrollRef} onScroll={handleCommentGifScroll} className="px-2 pb-2 overflow-y-auto flex-1 min-h-0" style={{ maxHeight: '240px' }}>
+                              {commentGifResults.length === 0 && commentGifLoading ? (
+                                <div className="flex items-center justify-center h-full">
+                                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                                </div>
+                              ) : commentGifResults.length === 0 ? (
+                                <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+                                  {commentGifSearchQuery.trim() ? 'No GIFs found' : 'Search for GIFs'}
+                                </div>
+                              ) : (
+                                <>
+                                  <div className="grid grid-cols-2 gap-1.5">
+                                    {commentGifResults.map((gif: any) => (
+                                      <button
+                                        key={gif.id}
+                                        type="button"
+                                        className="rounded-lg overflow-hidden hover:opacity-80 transition-opacity bg-muted relative group"
+                                        onClick={async () => {
+                                          const sendUrl = gif.mp4 || gif.url;
+                                          const sendType = gif.mp4 ? 'video/mp4' : 'image/gif';
+                                          if (!commentsMessage) return;
+                                          await addComment.mutateAsync({
+                                            messageId: commentsMessage.id,
+                                            content: makeCommentMediaContent(gif.title || 'GIF', sendUrl, sendType),
+                                          });
+                                          setShowCommentStickerPicker(false);
+                                          setCommentGifSearchQuery('');
+                                        }}
+                                      >
+                                        <video
+                                          src={gif.mp4 || gif.url}
+                                          className="w-full h-24 object-cover"
+                                          loop
+                                          muted
+                                          autoPlay
+                                          playsInline
+                                          preload="metadata"
+                                          disablePictureInPicture
+                                          disableRemotePlayback
+                                          controlsList="nodownload nofullscreen noremoteplayback noplaybackrate"
+                                        />
+                                      </button>
+                                    ))}
+                                  </div>
+                                  {commentGifLoading && (
+                                    <div className="flex items-center justify-center py-3">
+                                      <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Record button with dropdown */}
+                  {recording && recordingTargetRef.current === 'comment' ? (
+                    <button
+                      type="button"
+                      onClick={stopRecording}
+                      disabled={commentUploading}
+                      className="h-12 w-12 rounded-full shrink-0 flex items-center justify-center bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed relative"
+                      title="Stop recording"
+                    >
+                      <StopCircle className="w-5 h-5 text-red-500" />
+                      <span className="absolute -top-1 -right-1 bg-red-500 rounded-full w-2 h-2 animate-pulse" />
+                    </button>
+                  ) : (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          disabled={commentUploading}
+                          className="h-12 w-12 rounded-full shrink-0 flex items-center justify-center bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Record message"
+                        >
+                          <Video className="w-5 h-5" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-52">
+                        <DropdownMenuItem onClick={() => startRecording('audio', undefined, 'comment')}>
+                          <Mic className="w-4 h-4 mr-2" />
+                          <span>Voice message</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => startRecording('video', undefined, 'comment')}>
+                          <Video className="w-4 h-4 mr-2" />
+                          <span>Video message</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuSub>
+                          <DropdownMenuSubTrigger>
+                            <ScreenShare className="w-4 h-4 mr-2" />
+                            <span>Screen record</span>
+                          </DropdownMenuSubTrigger>
+                          <DropdownMenuSubContent className="w-56">
+                            <DropdownMenuItem onClick={() => startRecording('screen', { includeMicrophone: false, includeCamera: false }, 'comment')}>
+                              Screen only
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => startRecording('screen', { includeMicrophone: true, includeCamera: false }, 'comment')}>
+                              Screen + voice
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => startRecording('screen', { includeMicrophone: false, includeCamera: true }, 'comment')}>
+                              Screen + camera
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => startRecording('screen', { includeMicrophone: true, includeCamera: true }, 'comment')}>
+                              Screen + voice + camera
+                            </DropdownMenuItem>
+                          </DropdownMenuSubContent>
+                        </DropdownMenuSub>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+
+                  {/* File upload button */}
+                  <button
+                    type="button"
+                    onClick={() => commentFileInputRef.current?.click()}
+                    disabled={commentUploading}
+                    className="h-12 w-12 rounded-full shrink-0 flex items-center justify-center bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors disabled:opacity-50"
+                  >
+                    {commentUploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Paperclip className="w-5 h-5" />}
+                  </button>
+                  <input
+                    ref={commentFileInputRef}
+                    type="file"
+                    multiple
+                    onChange={handleCommentFileSelect}
+                    className="hidden"
+                  />
+
+                  {/* Send button */}
+                  <Button
+                    type="submit"
+                    size="icon"
+                    disabled={!commentInput.trim() || addComment.isPending}
+                    className="h-12 w-12 rounded-full shrink-0 bg-primary text-primary-foreground shadow-md shadow-primary/20 hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-50 disabled:transform-none"
+                    title={t('comments.send')}
+                  >
+                    {addComment.isPending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5 ml-0.5" />}
+                  </Button>
+                  {recording && recordingTargetRef.current === 'comment' && (
+                    <div className="absolute bottom-full mb-1 text-xs text-red-500">
+                      {formatRecordTime(recordTime)}
+                    </div>
+                  )}
+                </div>
+              </form>
+            ) : (
+              <p className="text-sm text-muted-foreground text-center py-2">{t('comments.disabled')}</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Channel settings dialog */}
+      <Dialog open={channelSettingsOpen} onOpenChange={setChannelSettingsOpen}>
+        <DialogContent className="sm:max-w-md" aria-describedby={undefined}>
+          <DialogHeader>
+            <DialogTitle>{t('chat.channelSettings')}</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-2">
+            <Button
+              variant="outline"
+              className="w-full justify-start"
+              onClick={() => {
+                setChannelSettingsOpen(false);
+                setCreatePollOpen(true);
+              }}
+            >
+              <BarChart3 className="w-4 h-4 mr-2" />
+              {t('chat.createPoll')}
+            </Button>
+
+            <Button
+              variant="outline"
+              className="w-full justify-start"
+              onClick={() => {
+                setChannelSettingsOpen(false);
+                setInviteLinksOpen(true);
+              }}
+            >
+              <Link2 className="w-4 h-4 mr-2" />
+              {t('chat.inviteLinks')}
+            </Button>
+
+            <Button
+              variant="outline"
+              className="w-full justify-start"
+              disabled={channelCommentsSetting.isPending}
+              onClick={() => {
+                if (!chat) return;
+                channelCommentsSetting.mutate({
+                  chatId,
+                  enabled: chat.commentsEnabled === false,
+                });
+              }}
+            >
+              <MessageCircle className="w-4 h-4 mr-2" />
+              {chat?.commentsEnabled === false ? t('comments.enable') : t('comments.disable')}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

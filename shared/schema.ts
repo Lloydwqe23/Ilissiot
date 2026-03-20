@@ -44,9 +44,11 @@ export type User = typeof users.$inferSelect;
 export const chats = pgTable("chats", {
   id: serial("id").primaryKey(),
   isGroup: boolean("is_group").default(false),
-  name: text("name"), // Only for group chats
-  avatarUrl: text("avatar_url"), // Only for group chats
-  creatorId: varchar("creator_id").references(() => users.id, { onDelete: "set null" }), // Original group creator
+  isChannel: boolean("is_channel").default(false),
+  commentsEnabled: boolean("comments_enabled").default(true), // Enable/disable comments on messages
+  name: text("name"), // For group/channel chats
+  avatarUrl: text("avatar_url"), // For group/channel chats
+  creatorId: varchar("creator_id").references(() => users.id, { onDelete: "set null" }), // Original group/channel creator
   hiddenBy: jsonb("hidden_by").default(sql`'[]'::jsonb`), // Array of userIds who "deleted" this chat for themselves
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
@@ -166,6 +168,21 @@ export const pollVotes = pgTable("poll_votes", {
 
 export type PollVote = typeof pollVotes.$inferSelect;
 
+// Comments on messages
+export const messageComments = pgTable("message_comments", {
+  id: serial("id").primaryKey(),
+  messageId: integer("message_id").references(() => messages.id, { onDelete: "cascade" }).notNull(),
+  senderId: varchar("sender_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  content: text("content").notNull(),
+  isEdited: boolean("is_edited").default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+}, (table) => [
+  index("IDX_comment_message").on(table.messageId),
+]);
+
+export type MessageComment = typeof messageComments.$inferSelect;
+
 export const usersRelations = relations(users, ({ many }) => ({
   memberships: many(chatMembers),
   messages: many(messages),
@@ -194,11 +211,17 @@ export const messagesRelations = relations(messages, ({ one, many }) => ({
   reactions: many(messageReactions),
   pinnedMessages: many(pinnedMessages),
   poll: one(polls, { fields: [messages.id], references: [polls.messageId] }),
+  comments: many(messageComments),
 }));
 
 export const messageReactionsRelations = relations(messageReactions, ({ one }) => ({
   message: one(messages, { fields: [messageReactions.messageId], references: [messages.id] }),
   user: one(users, { fields: [messageReactions.userId], references: [users.id] }),
+}));
+
+export const messageCommentsRelations = relations(messageComments, ({ one }) => ({
+  message: one(messages, { fields: [messageComments.messageId], references: [messages.id] }),
+  sender: one(users, { fields: [messageComments.senderId], references: [users.id] }),
 }));
 
 export const pinnedMessagesRelations = relations(pinnedMessages, ({ one }) => ({

@@ -4,6 +4,7 @@ import {
   chatMembers,
   messages,
   messageReactions,
+    messageComments,
   users,
   blocks,
   pinnedMessages,
@@ -14,6 +15,7 @@ import {
   type ChatWithMembers,
   type MessageWithSender,
   type ReactionWithUser,
+    type MessageComment,
   type InsertChat,
   type InsertMessage,
   type PinnedMessageWithDetails,
@@ -46,6 +48,9 @@ interface IStorage {
   getChat(id: number): Promise<ChatWithMembers | undefined>;
   createDirectChat(userId1: string, userId2: string): Promise<ChatWithMembers>;
   createGroupChat(name: string, creatorId: string, memberIds: string[]): Promise<ChatWithMembers>;
+  createChannel(name: string, creatorId: string): Promise<ChatWithMembers>;
+  searchChannels(query: string, userId: string): Promise<Array<{ id: number; name: string | null; avatarUrl: string | null; memberCount: number; isJoined: boolean }>>;
+  joinChannel(chatId: number, userId: string): Promise<ChatWithMembers>;
   updateGroupChat(chatId: number, updates: { name?: string; avatarUrl?: string | null }): Promise<ChatWithMembers>;
   addGroupMembers(chatId: number, userIds: string[]): Promise<ChatWithMembers>;
   removeGroupMember(chatId: number, userId: string): Promise<void>;
@@ -74,6 +79,13 @@ interface IStorage {
   verifyMessageAccess(messageId: number, userId: string): Promise<boolean>;
   // Get the chat (with members) that a message belongs to
   getChatByMessageId(messageId: number): Promise<ChatWithMembers | null>;
+ // Comment operations
+ listComments(messageId: number, userId: string): Promise<(MessageComment & { sender: User })[]>;
+ addComment(messageId: number, userId: string, content: string): Promise<MessageComment & { sender: User }>;
+ editComment(messageId: number, commentId: number, userId: string, content: string): Promise<MessageComment & { sender: User }>;
+ deleteComment(messageId: number, commentId: number, userId: string): Promise<void>;
+ // Channel comments settings
+ setChannelCommentsEnabled(chatId: number, userId: string, enabled: boolean): Promise<ChatWithMembers>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -339,7 +351,7 @@ export class DatabaseStorage implements IStorage {
     // Create the group chat
     const [chat] = await db
       .insert(chats)
-      .values({ isGroup: true, name, creatorId })
+      .values({ isGroup: true, isChannel: false, name, creatorId })
       .returning();
 
     // Add creator as admin + all other members
@@ -357,10 +369,107 @@ export class DatabaseStorage implements IStorage {
     return this.getChat(chat.id) as Promise<ChatWithMembers>;
   }
 
+  async createChannel(name: string, creatorId: string): Promise<ChatWithMembers> {
+    const [chat] = await db
+      .insert(chats)
+      .values({ isGroup: true, isChannel: true, name, creatorId })
+      .returning();
+
+    await db.insert(chatMembers).values({
+      chatId: chat.id,
+      userId: creatorId,
+      role: 'admin',
+      permissions: {},
+    });
+
+    return this.getChat(chat.id) as Promise<ChatWithMembers>;
+  }
+
+  async searchChannels(query: string, userId: string): Promise<Array<{ id: number; name: string | null; avatarUrl: string | null; memberCount: number; isJoined: boolean }>> {
+    const normalized = query.trim();
+    if (!normalized) return [];
+
+    const found = await db
+      .select({
+        id: chats.id,
+        name: chats.name,
+        avatarUrl: chats.avatarUrl,
+      })
+      .from(chats)
+      .where(and(eq(chats.isChannel, true), ilike(chats.name, `%${normalized}%`)))
+      .orderBy(desc(chats.updatedAt))
+      .limit(50);
+
+    if (found.length === 0) return [];
+
+    const channelIds = found.map((c) => c.id);
+
+    const memberCounts = await db
+      .select({
+        chatId: chatMembers.chatId,
+        count: sql<number>`count(*)`,
+      })
+      .from(chatMembers)
+      .where(inArray(chatMembers.chatId, channelIds))
+      .groupBy(chatMembers.chatId);
+
+    const joinedRows = await db
+      .select({ chatId: chatMembers.chatId })
+      .from(chatMembers)
+      .where(and(inArray(chatMembers.chatId, channelIds), eq(chatMembers.userId, userId)));
+
+    const countMap = new Map<number, number>(memberCounts.map((r) => [r.chatId, Number(r.count)]));
+    const joinedSet = new Set<number>(joinedRows.map((r) => r.chatId));
+
+    return found.map((c) => ({
+      id: c.id,
+      name: c.name,
+      avatarUrl: c.avatarUrl,
+      memberCount: countMap.get(c.id) || 0,
+      isJoined: joinedSet.has(c.id),
+    }));
+  }
+
+  async joinChannel(chatId: number, userId: string): Promise<ChatWithMembers> {
+    const chat = await this.getChat(chatId);
+    if (!chat) throw new Error('Chat not found');
+    if (!chat.isChannel) throw new Error('Not a channel');
+
+    const alreadyMember = chat.members.some((m) => m.userId === userId);
+    if (!alreadyMember) {
+      await db.insert(chatMembers).values({
+        chatId,
+        userId,
+        role: 'member',
+        permissions: { canPin: false, canInvite: false, canCreatePolls: false },
+      });
+    }
+
+    return this.getChat(chatId) as Promise<ChatWithMembers>;
+  }
+
   async updateGroupChat(chatId: number, updates: { name?: string; avatarUrl?: string | null }): Promise<ChatWithMembers> {
     await db
       .update(chats)
       .set({ ...updates, updatedAt: new Date() })
+      .where(eq(chats.id, chatId));
+
+    return this.getChat(chatId) as Promise<ChatWithMembers>;
+  }
+
+  async setChannelCommentsEnabled(chatId: number, userId: string, enabled: boolean): Promise<ChatWithMembers> {
+    const chat = await this.getChat(chatId);
+    if (!chat) throw new Error('Chat not found');
+    if (!chat.isChannel) throw new Error('Not a channel');
+
+    const member = chat.members.find(m => m.userId === userId);
+    if (!member || member.role !== 'admin') {
+      throw new Error('Only channel admins can update comments settings');
+    }
+
+    await db
+      .update(chats)
+      .set({ commentsEnabled: enabled, updatedAt: new Date() })
       .where(eq(chats.id, chatId));
 
     return this.getChat(chatId) as Promise<ChatWithMembers>;
@@ -875,6 +984,7 @@ export class DatabaseStorage implements IStorage {
     const messageIds = chatMessages.map(m => m.id);
     if (messageIds.length > 0) {
       await db.delete(messageReactions).where(inArray(messageReactions.messageId, messageIds));
+      await db.delete(messageComments).where(inArray(messageComments.messageId, messageIds));
     }
 
     // 5. Messages
@@ -912,7 +1022,98 @@ export class DatabaseStorage implements IStorage {
       .from(messages)
       .where(eq(messages.id, messageId));
     if (!msg) return null;
-    return this.getChat(msg.chatId);
+    return (await this.getChat(msg.chatId)) ?? null;
+  }
+
+  async listComments(messageId: number, userId: string): Promise<(MessageComment & { sender: User })[]> {
+    const hasAccess = await this.verifyMessageAccess(messageId, userId);
+    if (!hasAccess) throw new Error('Forbidden');
+
+    const rows = await db
+      .select({ comment: messageComments, sender: users })
+      .from(messageComments)
+      .innerJoin(users, eq(messageComments.senderId, users.id))
+      .where(eq(messageComments.messageId, messageId))
+      .orderBy(asc(messageComments.createdAt));
+
+    return rows.map(r => ({
+      ...r.comment,
+      sender: sanitizeUser(r.sender),
+    })) as any;
+  }
+
+  async addComment(messageId: number, userId: string, content: string): Promise<MessageComment & { sender: User }> {
+    const hasAccess = await this.verifyMessageAccess(messageId, userId);
+    if (!hasAccess) throw new Error('Forbidden');
+
+    const [msg] = await db
+      .select({ chatId: messages.chatId })
+      .from(messages)
+      .where(eq(messages.id, messageId));
+    if (!msg) throw new Error('Message not found');
+
+    const chat = await this.getChat(msg.chatId);
+    if (!chat) throw new Error('Chat not found');
+
+    if (chat.isChannel && chat.commentsEnabled === false) {
+      throw new Error('Comments are disabled for this channel');
+    }
+
+    const [comment] = await db
+      .insert(messageComments)
+      .values({ messageId, senderId: userId, content, isEdited: false })
+      .returning();
+
+    const [sender] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    return { ...comment, sender: sanitizeUser(sender) } as any;
+  }
+
+  async editComment(messageId: number, commentId: number, userId: string, content: string): Promise<MessageComment & { sender: User }> {
+    const hasAccess = await this.verifyMessageAccess(messageId, userId);
+    if (!hasAccess) throw new Error('Forbidden');
+
+    const [existing] = await db
+      .select()
+      .from(messageComments)
+      .where(and(eq(messageComments.id, commentId), eq(messageComments.messageId, messageId)));
+    if (!existing) throw new Error('Comment not found');
+    if (existing.senderId !== userId) throw new Error('You can only edit your own comments');
+
+    const [updated] = await db
+      .update(messageComments)
+      .set({ content, isEdited: true, updatedAt: new Date() })
+      .where(eq(messageComments.id, commentId))
+      .returning();
+
+    const [sender] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    return { ...updated, sender: sanitizeUser(sender) } as any;
+  }
+
+  async deleteComment(messageId: number, commentId: number, userId: string): Promise<void> {
+    const hasAccess = await this.verifyMessageAccess(messageId, userId);
+    if (!hasAccess) throw new Error('Forbidden');
+
+    const [existing] = await db
+      .select()
+      .from(messageComments)
+      .where(and(eq(messageComments.id, commentId), eq(messageComments.messageId, messageId)));
+    if (!existing) throw new Error('Comment not found');
+
+    const [msg] = await db
+      .select({ chatId: messages.chatId })
+      .from(messages)
+      .where(eq(messages.id, messageId));
+    if (!msg) throw new Error('Message not found');
+
+    const chat = await this.getChat(msg.chatId);
+    const me = chat?.members.find(m => m.userId === userId);
+    const canModerate = !!me && me.role === 'admin';
+
+    if (existing.senderId !== userId && !canModerate) {
+      throw new Error('You can only delete your own comments');
+    }
+
+    await db.delete(messageComments).where(eq(messageComments.id, commentId));
   }
 
   async leaveChatForUser(chatId: number, userId: string): Promise<void> {

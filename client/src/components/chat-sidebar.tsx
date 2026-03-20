@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useRoute, useLocation } from "wouter";
 import { format, isToday, isYesterday } from "date-fns";
-import { Edit, LogOut, Settings, MoreVertical, ArrowLeft, Image, Mic, Video, Phone, FileText, Sticker, Pin, PinOff, LogOut as LeaveIcon, Users, BellOff, Bell } from "lucide-react";
+import { Edit, LogOut, Settings, MoreVertical, ArrowLeft, Image, Mic, Video, Phone, FileText, Sticker, Pin, PinOff, LogOut as LeaveIcon, Users, BellOff, Bell, Megaphone } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { stripFormatting } from "@/lib/format-message";
 import { useChatMuted, setChatMute, muteFor } from "@/lib/chat-mute";
@@ -101,7 +101,7 @@ function ChatSidebarItem({
           <Avatar className="w-12 h-12 border border-black/5">
             <AvatarImage src={avatarUrl || ""} />
             <AvatarFallback className="text-sm font-medium bg-primary/10 text-primary">
-              {chat.isGroup ? <Users className="w-5 h-5" /> : initials}
+              {chat.isChannel ? <Megaphone className="w-5 h-5" /> : chat.isGroup ? <Users className="w-5 h-5" /> : initials}
             </AvatarFallback>
           </Avatar>
           <OnlineIndicator userId={otherUserId} />

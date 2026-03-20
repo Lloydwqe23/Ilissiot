@@ -17,8 +17,8 @@ export const userSchema = z.object({
   bio: z.string().nullable(),
   birthday: z.string().nullable().optional(),
   status: z.string().nullable(),
-  theme: z.string().default('light').optional(),
-  language: z.enum(['en', 'uk', 'es', 'de']).default('en').optional(),
+  theme: z.string().nullable().optional(),
+  language: z.string().nullable().optional(),
   colorTheme: z.string().nullable().optional(),
   fontType: z.string().nullable().optional(),
   textSize: z.string().nullable().optional(),
@@ -47,6 +47,17 @@ export const reactionResponseSchema = z.object({
   emoji: z.string(),
   createdAt: z.string().or(z.date()).nullable(),
   user: userSchema,
+});
+
+export const commentResponseSchema = z.object({
+  id: z.number(),
+  messageId: z.number(),
+  senderId: z.string(),
+  content: z.string(),
+  isEdited: z.boolean(),
+  createdAt: z.string().or(z.date()).nullable(),
+  updatedAt: z.string().or(z.date()).nullable(),
+  sender: userSchema,
 });
 
 export const pollOptionResponseSchema = z.object({
@@ -99,6 +110,8 @@ export const messageResponseSchema = z.object({
 export const chatResponseSchema = z.object({
   id: z.number(),
   isGroup: z.boolean().nullable(),
+  isChannel: z.boolean().nullable().optional(),
+  commentsEnabled: z.boolean().nullable().optional(),
   name: z.string().nullable(),
   avatarUrl: z.string().nullable(),
   creatorId: z.string().nullable().optional(),
@@ -231,6 +244,18 @@ export const api = {
       input: z.object({
         name: z.string().min(1).max(100),
         memberIds: z.array(z.string()).min(1),
+      }),
+      responses: {
+        201: chatResponseSchema,
+        400: errorSchemas.validation,
+        401: errorSchemas.unauthorized,
+      },
+    },
+    createChannel: {
+      method: 'POST' as const,
+      path: '/api/chats/channel' as const,
+      input: z.object({
+        name: z.string().min(1).max(100),
       }),
       responses: {
         201: chatResponseSchema,
@@ -396,6 +421,52 @@ export const api = {
     removeReaction: {
       method: 'DELETE' as const,
       path: '/api/messages/:messageId/reactions/:emoji' as const,
+         comments: {
+           list: {
+             method: 'GET' as const,
+             path: '/api/messages/:messageId/comments' as const,
+             responses: {
+               200: z.array(commentResponseSchema),
+               401: errorSchemas.unauthorized,
+               404: errorSchemas.notFound,
+             },
+           },
+           add: {
+             method: 'POST' as const,
+             path: '/api/messages/:messageId/comments' as const,
+             input: z.object({
+               content: z.string().min(1).max(5000),
+             }),
+             responses: {
+               201: commentResponseSchema,
+               400: errorSchemas.validation,
+               401: errorSchemas.unauthorized,
+               404: errorSchemas.notFound,
+             },
+           },
+           edit: {
+             method: 'PUT' as const,
+             path: '/api/messages/:messageId/comments/:commentId' as const,
+             input: z.object({
+               content: z.string().min(1).max(5000),
+             }),
+             responses: {
+               200: commentResponseSchema,
+               400: errorSchemas.validation,
+               401: errorSchemas.unauthorized,
+               404: errorSchemas.notFound,
+             },
+           },
+           delete: {
+             method: 'DELETE' as const,
+             path: '/api/messages/:messageId/comments/:commentId' as const,
+             responses: {
+               200: z.object({ success: z.boolean() }),
+               401: errorSchemas.unauthorized,
+               404: errorSchemas.notFound,
+             },
+           },
+         },
       responses: {
         200: z.object({ success: z.boolean() }),
         401: errorSchemas.unauthorized,
@@ -421,3 +492,4 @@ export type ChatResponse = z.infer<typeof chatResponseSchema>;
 export type MessageResponse = z.infer<typeof messageResponseSchema>;
 export type ReactionResponse = z.infer<typeof reactionResponseSchema>;
 export type UserResponse = z.infer<typeof userSchema>;
+export type CommentResponse = z.infer<typeof commentResponseSchema>;
