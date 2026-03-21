@@ -11,7 +11,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useUpdateProfile } from "@/hooks/use-users";
 import { useToast } from "@/hooks/use-toast";
 import { useBlockedUsers, useUnblockUser } from "@/hooks/use-chats";
-import { Loader2, Camera, Trash2, X } from "lucide-react";
+import { Loader2, Camera, Trash2, X, Shield, Ban } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { APP_LANGUAGES, getLanguageLabel, resolveLanguage, translate, type AppLanguage } from "@/lib/i18n";
 
@@ -40,10 +40,14 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
   const [colorTheme, setColorTheme] = useState<string>(user?.colorTheme || 'blue');
   const [fontType, setFontType] = useState<string>(user?.fontType || 'inter');
   const [textSize, setTextSize] = useState<string>(user?.textSize || 'normal');
+  const [sidebarPlacement, setSidebarPlacement] = useState<'left' | 'right' | 'top' | 'bottom'>((user?.sidebarPlacement as 'left' | 'right' | 'top' | 'bottom') || 'left');
   const t = (key: string) => translate(language, key);
 
-  // blocked users list view state
-  const [view, setView] = useState<'profile' | 'blocked' | 'design'>('profile');
+  // settings view state
+  const [view, setView] = useState<'profile' | 'design' | 'privacy'>('profile');
+  const [blockedUsersOpen, setBlockedUsersOpen] = useState(false);
+  const [privacyLastSeen, setPrivacyLastSeen] = useState<'everyone' | 'nobody'>((user?.lastSeenPrivacy as 'everyone' | 'nobody') || 'everyone');
+  const [privacyWhoCanAdd, setPrivacyWhoCanAdd] = useState<'everyone' | 'nobody'>((user?.groupAddPrivacy as 'everyone' | 'nobody') || 'everyone');
   const blockedUsersQuery = useBlockedUsers();
   const unblockMut = useUnblockUser();
 
@@ -61,6 +65,9 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
       setColorTheme(user.colorTheme || 'blue');
       setFontType(user.fontType || 'inter');
       setTextSize(user.textSize || 'normal');
+      setSidebarPlacement((user.sidebarPlacement as 'left' | 'right' | 'top' | 'bottom') || 'left');
+      setPrivacyLastSeen((user.lastSeenPrivacy as 'everyone' | 'nobody') || 'everyone');
+      setPrivacyWhoCanAdd((user.groupAddPrivacy as 'everyone' | 'nobody') || 'everyone');
     }
   }, [open, user]);
 
@@ -171,6 +178,9 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
       colorTheme,
       fontType,
       textSize,
+      sidebarPlacement,
+      lastSeenPrivacy: privacyLastSeen,
+      groupAddPrivacy: privacyWhoCanAdd,
     }, {
       onSuccess: () => {
         const appearanceClasses = ['light', 'dark', 'greenish', 'yellowish', 'blueish', 'purpleish', 'pinkish', 'orangeish'];
@@ -193,6 +203,9 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
         // Apply global text size
         document.documentElement.classList.remove(...textSizeClasses);
         document.documentElement.classList.add(`text-size-${textSize}`);
+
+        // Store layout preference on the root for immediate UI updates.
+        document.documentElement.setAttribute('data-sidebar-placement', sidebarPlacement);
 
         toast({ title: t("profile.updated") });
         onOpenChange(false);
@@ -228,10 +241,10 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
             </button>
             <button
               type="button"
-              className={`text-sm font-medium ${view === 'blocked' ? 'text-foreground' : 'text-muted-foreground'}`}
-              onClick={() => setView('blocked')}
+              className={`text-sm font-medium ${view === 'privacy' ? 'text-foreground' : 'text-muted-foreground'}`}
+              onClick={() => setView('privacy')}
             >
-              {t("profile.tabBlocked")}
+              {t("profile.tabPrivacy")}
             </button>
           </div>
         </DialogHeader>
@@ -521,44 +534,121 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
                   ))}
                 </div>
               </div>
+
+              <div className="space-y-3">
+                <Label className="text-base font-semibold">{t("profile.sidebarPlacement")}</Label>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { name: 'left', label: t('design.sidebar.left') },
+                    { name: 'right', label: t('design.sidebar.right') },
+                    { name: 'top', label: t('design.sidebar.top') },
+                    { name: 'bottom', label: t('design.sidebar.bottom') },
+                  ].map(({ name, label }) => (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => setSidebarPlacement(name as 'left' | 'right' | 'top' | 'bottom')}
+                      className={`p-3 rounded-xl border-2 transition-all ${
+                        sidebarPlacement === name
+                          ? 'border-primary bg-primary/5 ring-2 ring-primary/20'
+                          : 'border-border hover:border-primary/50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-center gap-2">
+                        <span className="text-sm font-medium">{label}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </>
           )}
-          {view === 'blocked' && (
-            <div>
-              {blockedUsersQuery.isLoading && <Loader2 className="animate-spin" />}
-              {blockedUsersQuery.data?.length === 0 && !blockedUsersQuery.isLoading && (
-                <p className="text-sm text-muted-foreground">{t("profile.noBlockedUsers")}</p>
-              )}
-              {blockedUsersQuery.data?.map(u => (
-                <div key={u.id} className="flex items-center justify-between py-2">
-                  <div className="flex items-center gap-3">
-                    <Avatar className="w-8 h-8">
-                      <AvatarImage src={u.profileImageUrl || ''} />
-                      <AvatarFallback>{(u.firstName || u.email || 'U')[0]}</AvatarFallback>
-                    </Avatar>
-                    <span className="text-sm">{u.firstName || u.email || t("profile.unknown")}</span>
+          {view === 'privacy' && (
+            <>
+              <div className="space-y-3">
+                <Label className="text-base font-semibold">{t("profile.privacy")}</Label>
+
+                <div className="rounded-xl border border-border/60 bg-muted/30 p-4 space-y-4">
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">{t("profile.lastSeenPrivacy")}</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {([
+                        { value: 'everyone', label: t('profile.privacy.everyone') },
+                        { value: 'nobody', label: t('profile.privacy.nobody') },
+                      ] as const).map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => setPrivacyLastSeen(option.value)}
+                          className={`rounded-lg border px-2 py-2 text-xs transition-all ${
+                            privacyLastSeen === option.value
+                              ? 'border-primary bg-primary/10 text-foreground'
+                              : 'border-border bg-background/50 text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      unblockMut.mutate(u.id, {
-                        onSuccess: () => blockedUsersQuery.refetch(),
-                      });
-                    }}
-                  >
-                    {t("profile.unblock")}
-                  </Button>
+
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">{t("profile.whoCanAddToGroups")}</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {([
+                        { value: 'everyone', label: t('profile.privacy.everyone') },
+                        { value: 'nobody', label: t('profile.privacy.nobody') },
+                      ] as const).map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => setPrivacyWhoCanAdd(option.value)}
+                          className={`rounded-lg border px-2 py-2 text-xs transition-all ${
+                            privacyWhoCanAdd === option.value
+                              ? 'border-primary bg-primary/10 text-foreground'
+                              : 'border-border bg-background/50 text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                 </div>
-              ))}
-            </div>
+
+                <div className="rounded-xl border border-border/60 bg-muted/30 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground flex items-center gap-2">
+                        <Shield className="h-4 w-4 text-primary" />
+                        {t("profile.blockedUsers")}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {t("profile.blockedUsersDescription")}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="rounded-lg"
+                      onClick={() => setBlockedUsersOpen(true)}
+                    >
+                      <Ban className="mr-1 h-3.5 w-3.5" />
+                      {t("profile.openBlockedUsers")}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </>
           )}
         </div>
         <div className="p-6 pt-0 flex justify-end gap-3">
           <Button variant="ghost" className="rounded-xl" onClick={() => onOpenChange(false)}>
             {t("common.cancel")}
           </Button>
-          {(view === 'profile' || view === 'design') && (
+          {(view === 'profile' || view === 'design' || view === 'privacy') && (
             <Button 
               onClick={handleSave} 
               disabled={updateProfile.isPending || uploadingImage}
@@ -636,6 +726,52 @@ export function ProfileSettings({ open, onOpenChange }: { open: boolean; onOpenC
         </div>
         <div className="p-4 flex justify-end">
           <Button variant="ghost" className="rounded-xl" onClick={() => setPreviewImageUrl(null)}>
+            {t("common.close")}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    {/* Blocked Users Dialog */}
+    <Dialog open={blockedUsersOpen} onOpenChange={setBlockedUsersOpen}>
+      <DialogContent className="sm:max-w-[460px] rounded-2xl p-0 overflow-hidden border-border/50 shadow-2xl" aria-describedby={undefined}>
+        <DialogHeader className="p-4 border-b border-border/50">
+          <DialogTitle>{t("profile.blockedUsers")}</DialogTitle>
+        </DialogHeader>
+        <div className="max-h-[50vh] overflow-y-auto p-4">
+          {blockedUsersQuery.isLoading && (
+            <div className="flex items-center justify-center py-10">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          )}
+          {blockedUsersQuery.data?.length === 0 && !blockedUsersQuery.isLoading && (
+            <p className="text-sm text-muted-foreground">{t("profile.noBlockedUsers")}</p>
+          )}
+          {blockedUsersQuery.data?.map(u => (
+            <div key={u.id} className="flex items-center justify-between py-2">
+              <div className="flex items-center gap-3">
+                <Avatar className="w-8 h-8">
+                  <AvatarImage src={u.profileImageUrl || ''} />
+                  <AvatarFallback>{(u.firstName || u.email || 'U')[0]}</AvatarFallback>
+                </Avatar>
+                <span className="text-sm">{u.firstName || u.email || t("profile.unknown")}</span>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  unblockMut.mutate(u.id, {
+                    onSuccess: () => blockedUsersQuery.refetch(),
+                  });
+                }}
+              >
+                {t("profile.unblock")}
+              </Button>
+            </div>
+          ))}
+        </div>
+        <div className="border-t border-border/50 p-4 flex justify-end">
+          <Button variant="ghost" className="rounded-xl" onClick={() => setBlockedUsersOpen(false)}>
             {t("common.close")}
           </Button>
         </div>

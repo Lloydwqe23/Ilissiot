@@ -30,6 +30,8 @@ const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 const SIDEBAR_WIDTH = "16rem"
 const SIDEBAR_WIDTH_MOBILE = "100vw"
 const SIDEBAR_WIDTH_ICON = "3rem"
+const SIDEBAR_HEIGHT = "16rem"
+const SIDEBAR_HEIGHT_ICON = "3rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 
 type SidebarContextProps = {
@@ -135,6 +137,8 @@ function SidebarProvider({
             {
               "--sidebar-width": SIDEBAR_WIDTH,
               "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
+              "--sidebar-height": SIDEBAR_HEIGHT,
+              "--sidebar-height-icon": SIDEBAR_HEIGHT_ICON,
               ...style,
             } as React.CSSProperties
           }
@@ -159,7 +163,7 @@ function Sidebar({
   children,
   ...props
 }: React.ComponentProps<"div"> & {
-  side?: "left" | "right"
+  side?: "left" | "right" | "top" | "bottom"
   variant?: "sidebar" | "floating" | "inset"
   collapsible?: "offcanvas" | "icon" | "none"
 }) {
@@ -181,6 +185,7 @@ function Sidebar({
   }
 
   if (isMobile) {
+    const mobileSide = side === "top" || side === "bottom" ? "left" : side
     return (
       <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
         <SheetContent
@@ -193,7 +198,7 @@ function Sidebar({
               "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
             } as React.CSSProperties
           }
-          side={side}
+          side={mobileSide}
         >
           <SheetHeader className="sr-only">
             <SheetTitle>Sidebar</SheetTitle>
@@ -218,25 +223,39 @@ function Sidebar({
       <div
         data-slot="sidebar-gap"
         className={cn(
-          "relative w-[var(--sidebar-width)] bg-transparent transition-[width] duration-200 ease-linear",
-          "group-data-[collapsible=offcanvas]:w-0",
+          "relative bg-transparent transition-[width,height] duration-200 ease-linear",
+          side === "top" || side === "bottom"
+            ? "h-[var(--sidebar-height)] w-full group-data-[collapsible=offcanvas]:h-0"
+            : "w-[var(--sidebar-width)] group-data-[collapsible=offcanvas]:w-0",
           "group-data-[side=right]:rotate-180",
           variant === "floating" || variant === "inset"
-            ? "group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+var(--spacing-4))]"
-            : "group-data-[collapsible=icon]:w-[var(--sidebar-width-icon)]"
+            ? side === "top" || side === "bottom"
+              ? "group-data-[collapsible=icon]:h-[calc(var(--sidebar-height-icon)+var(--spacing-4))]"
+              : "group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+var(--spacing-4))]"
+            : side === "top" || side === "bottom"
+              ? "group-data-[collapsible=icon]:h-[var(--sidebar-height-icon)]"
+              : "group-data-[collapsible=icon]:w-[var(--sidebar-width-icon)]"
         )}
       />
       <div
         data-slot="sidebar-container"
         className={cn(
-          "fixed inset-y-0 z-10 hidden h-svh w-[var(--sidebar-width)] transition-[left,right,width] duration-200 ease-linear md:flex",
+          "fixed z-10 hidden transition-[left,right,top,bottom,width,height] duration-200 ease-linear md:flex",
           side === "left"
-            ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
-            : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
+            ? "inset-y-0 left-0 h-svh w-[var(--sidebar-width)] group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
+            : side === "right"
+              ? "inset-y-0 right-0 h-svh w-[var(--sidebar-width)] group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]"
+              : side === "top"
+                ? "inset-x-0 top-0 h-[var(--sidebar-height)] w-full group-data-[collapsible=offcanvas]:top-[calc(var(--sidebar-height)*-1)]"
+                : "inset-x-0 bottom-0 h-[var(--sidebar-height)] w-full group-data-[collapsible=offcanvas]:bottom-[calc(var(--sidebar-height)*-1)]",
           // Adjust the padding for floating and inset variants.
           variant === "floating" || variant === "inset"
-            ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+var(--spacing-4)+2px)]"
-            : "group-data-[collapsible=icon]:w-[var(--sidebar-width-icon)] group-data-[side=left]:border-r group-data-[side=right]:border-l",
+            ? side === "top" || side === "bottom"
+              ? "p-2 group-data-[collapsible=icon]:h-[calc(var(--sidebar-height-icon)+var(--spacing-4)+2px)]"
+              : "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+var(--spacing-4)+2px)]"
+            : side === "top" || side === "bottom"
+              ? "group-data-[collapsible=icon]:h-[var(--sidebar-height-icon)] group-data-[side=top]:border-b group-data-[side=bottom]:border-t"
+              : "group-data-[collapsible=icon]:w-[var(--sidebar-width-icon)] group-data-[side=left]:border-r group-data-[side=right]:border-l",
           className
         )}
         {...props}

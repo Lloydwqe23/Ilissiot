@@ -3,8 +3,8 @@ import { type Server, type IncomingMessage, ServerResponse } from "http";
 import { WebSocketServer, WebSocket } from 'ws';
 import { storage } from "./storage";
 import { db } from "./db";
-import { messages } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { messages, users } from "@shared/schema";
+import { eq, inArray } from "drizzle-orm";
 import { setupAuth, registerAuthRoutes, isAuthenticated, sessionMiddleware } from "./auth/local";
 import { registerUploadRoutes } from "./upload";
 import { api, WS_EVENTS, type WsMessage } from "@shared/routes";
@@ -14,6 +14,71 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+
+  type LastSeenPrivacy = 'everyone' | 'nobody';
+
+  const loadLastSeenPrivacy = async (userIds: string[]): Promise<Map<string, LastSeenPrivacy>> => {
+    const unique = Array.from(new Set(userIds.filter(Boolean)));
+    if (unique.length === 0) return new Map();
+
+    const rows = await db
+      .select({ id: users.id, lastSeenPrivacy: users.lastSeenPrivacy })
+      .from(users)
+      .where(inArray(users.id, unique));
+
+    return new Map(
+      rows.map((row) => [row.id, (row.lastSeenPrivacy as LastSeenPrivacy) || 'everyone'])
+    );
+  };
+
+  const applyLastSeenPrivacyToUser = (
+    user: any,
+    viewerId: string,
+    privacyMap: Map<string, LastSeenPrivacy>
+  ) => {
+    const cloned = { ...user };
+    const targetPrivacy = privacyMap.get(cloned.id) || 'everyone';
+    if (cloned.id !== viewerId && targetPrivacy === 'nobody') {
+      cloned.lastSeen = null;
+    }
+    delete cloned.lastSeenPrivacy;
+    delete cloned.groupAddPrivacy;
+    return cloned;
+  };
+
+  const applyLastSeenPrivacyToUsers = async (list: any[], viewerId: string) => {
+    const privacyMap = await loadLastSeenPrivacy(list.map((u) => u.id).filter(Boolean));
+    return list.map((u) => applyLastSeenPrivacyToUser(u, viewerId, privacyMap));
+  };
+
+  const applyLastSeenPrivacyToChat = async (chat: any, viewerId: string) => {
+    const privacyMap = await loadLastSeenPrivacy(
+      (chat.members || []).map((m: any) => m.user?.id).filter(Boolean)
+    );
+
+    return {
+      ...chat,
+      members: (chat.members || []).map((m: any) => ({
+        ...m,
+        user: applyLastSeenPrivacyToUser(m.user, viewerId, privacyMap),
+      })),
+    };
+  };
+
+  const applyLastSeenPrivacyToChats = async (chats: any[], viewerId: string) => {
+    const allUserIds = chats.flatMap((chat: any) =>
+      (chat.members || []).map((m: any) => m.user?.id).filter(Boolean)
+    );
+    const privacyMap = await loadLastSeenPrivacy(allUserIds);
+
+    return chats.map((chat: any) => ({
+      ...chat,
+      members: (chat.members || []).map((m: any) => ({
+        ...m,
+        user: applyLastSeenPrivacyToUser(m.user, viewerId, privacyMap),
+      })),
+    }));
+  };
   
   // Set up authentication FIRST
   await setupAuth(app);
@@ -147,7 +212,7 @@ export async function registerRoutes(
         // Broadcast status change
         broadcast(currentUserId, {
           type: WS_EVENTS.USER_STATUS,
-          payload: { userId: currentUserId, status: 'offline', lastSeen: new Date() }
+          payload: { userId: currentUserId, status: 'offline' }
         });
       }
     });
@@ -202,7 +267,8 @@ export async function registerRoutes(
         return res.json([]);
       }
       const users = await storage.searchUsers(query, userId);
-      res.json(users);
+      const usersWithPrivacy = await applyLastSeenPrivacyToUsers(users as any[], userId);
+      res.json(usersWithPrivacy);
     } catch (err) {
       console.error("Search users error:", err);
       res.status(500).json({ message: "Internal server error" });
@@ -259,7 +325,8 @@ export async function registerRoutes(
     try {
       const currentUserId = req.user.claims.sub;
       const users = await storage.getBlockedUsers(currentUserId);
-      res.json(users);
+      const usersWithPrivacy = await applyLastSeenPrivacyToUsers(users as any[], currentUserId);
+      res.json(usersWithPrivacy);
     } catch (err) {
       console.error("Get blocked users error:", err);
       res.status(500).json({ message: "Internal server error" });
@@ -297,7 +364,8 @@ export async function registerRoutes(
     try {
       const userId = req.user.claims.sub;
       const chats = await storage.getChatsForUser(userId);
-      res.json(chats);
+      const chatsWithPrivacy = await applyLastSeenPrivacyToChats(chats as any[], userId);
+      res.json(chatsWithPrivacy);
     } catch (err) {
       console.error("Get chats error:", err);
       res.status(500).json({ message: "Internal server error" });
@@ -318,7 +386,8 @@ export async function registerRoutes(
         return res.status(401).json({ message: "Unauthorized" });
       }
 
-      res.json(chat);
+      const chatWithPrivacy = await applyLastSeenPrivacyToChat(chat, userId);
+      res.json(chatWithPrivacy);
     } catch (err) {
       res.status(500).json({ message: "Internal server error" });
     }
@@ -335,7 +404,8 @@ export async function registerRoutes(
       }
 
       const chat = await storage.createDirectChat(currentUserId, input.userId);
-      res.status(201).json(chat);
+      const chatWithPrivacy = await applyLastSeenPrivacyToChat(chat, currentUserId);
+      res.status(201).json(chatWithPrivacy);
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message });
@@ -375,8 +445,23 @@ export async function registerRoutes(
     try {
       const input = api.chats.createGroup.input.parse(req.body);
       const currentUserId = req.user.claims.sub;
+
+      const incomingMemberIds = Array.from(new Set(input.memberIds.filter((id) => id !== currentUserId)));
+      if (incomingMemberIds.length > 0) {
+        const targets = await db
+          .select({ id: users.id, groupAddPrivacy: users.groupAddPrivacy })
+          .from(users)
+          .where(inArray(users.id, incomingMemberIds));
+
+        const blockedByPrivacy = targets.filter((u) => (u.groupAddPrivacy || 'everyone') === 'nobody');
+        if (blockedByPrivacy.length > 0) {
+          return res.status(403).json({ message: "Some users don't allow being added to groups" });
+        }
+      }
+
       const chat = await storage.createGroupChat(input.name, currentUserId, input.memberIds);
-      res.status(201).json(chat);
+      const chatWithPrivacy = await applyLastSeenPrivacyToChat(chat, currentUserId);
+      res.status(201).json(chatWithPrivacy);
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message });
@@ -392,7 +477,8 @@ export async function registerRoutes(
       const input = api.chats.createChannel.input.parse(req.body);
       const currentUserId = req.user.claims.sub;
       const chat = await storage.createChannel(input.name, currentUserId);
-      res.status(201).json(chat);
+      const chatWithPrivacy = await applyLastSeenPrivacyToChat(chat, currentUserId);
+      res.status(201).json(chatWithPrivacy);
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message });
@@ -444,8 +530,22 @@ export async function registerRoutes(
       if (!chat.isGroup) return res.status(400).json({ message: "Not a group chat" });
       if (!chat.members.some(m => m.userId === userId)) return res.status(401).json({ message: "Unauthorized" });
 
+      const incomingMemberIds = Array.from(new Set((userIds || []).filter((id) => !!id && id !== userId)));
+      if (incomingMemberIds.length > 0) {
+        const targets = await db
+          .select({ id: users.id, groupAddPrivacy: users.groupAddPrivacy })
+          .from(users)
+          .where(inArray(users.id, incomingMemberIds));
+
+        const blockedByPrivacy = targets.filter((u) => (u.groupAddPrivacy || 'everyone') === 'nobody');
+        if (blockedByPrivacy.length > 0) {
+          return res.status(403).json({ message: "Some users don't allow being added to groups" });
+        }
+      }
+
       const updated = await storage.addGroupMembers(chatId, userIds);
-      res.json(updated);
+      const updatedWithPrivacy = await applyLastSeenPrivacyToChat(updated, userId);
+      res.json(updatedWithPrivacy);
     } catch (err) {
       console.error("Add group members error:", err);
       res.status(500).json({ message: "Internal server error" });

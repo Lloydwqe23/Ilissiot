@@ -118,8 +118,19 @@ app.use((req, res, next) => {
     // A05: Do not leak internal error messages to the client
     const message = status < 500 ? (err.message || "Error") : "Internal Server Error";
 
-    // A09: Log full error server-side only
-    console.error("Server error:", err);
+    const missingUploadFile =
+      status === 404 &&
+      err?.code === "ENOENT" &&
+      typeof err?.path === "string" &&
+      err.path.includes(`${path.sep}public${path.sep}uploads${path.sep}`);
+
+    if (missingUploadFile) {
+      // Missing media files are expected in some histories; keep logs concise.
+      console.warn("[uploads] Missing file:", err.path);
+    } else {
+      // A09: Log full error server-side only
+      console.error("Server error:", err);
+    }
 
     if (res.headersSent) {
       return next(err);

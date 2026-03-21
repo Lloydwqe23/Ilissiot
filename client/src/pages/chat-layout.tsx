@@ -29,6 +29,10 @@ function MobileSidebarController({ hasChatOpen }: { hasChatOpen: boolean }) {
 export function ChatLayout() {
   const [match, params] = useRoute("/chat/:id");
   const { user } = useAuth();
+  const sidebarPlacement = (user?.sidebarPlacement as 'left' | 'right' | 'top' | 'bottom') || 'left';
+  const isHorizontalSidebar = sidebarPlacement === 'top' || sidebarPlacement === 'bottom';
+  const renderSidebarBeforeMain = sidebarPlacement === 'left' || sidebarPlacement === 'top';
+  const renderSidebarAfterMain = sidebarPlacement === 'right' || sidebarPlacement === 'bottom';
   const language = resolveLanguage(user?.language);
   const t = (key: string) => translate(language, key);
   const { notifications, addNotification, dismissNotification } = useNotificationManager();
@@ -45,16 +49,18 @@ export function ChatLayout() {
   const sidebarStyle = {
     "--sidebar-width": "22rem",
     "--sidebar-width-icon": "4rem",
+    "--sidebar-height": "8rem",
+    "--sidebar-height-icon": "4rem",
   } as React.CSSProperties;
 
   return (
     <SidebarProvider style={sidebarStyle}>
       <MobileSidebarController hasChatOpen={hasChatOpen} />
-      <div className="flex h-dvh w-full overflow-hidden bg-background">
-        <ChatSidebar />
+      <div className={`flex h-dvh w-full overflow-hidden bg-background ${isHorizontalSidebar ? 'flex-col' : 'flex-row'}`}>
+        {renderSidebarBeforeMain ? <ChatSidebar placement={sidebarPlacement} /> : null}
         
         {/* Main Content Area */}
-        <main className="flex-1 flex flex-col min-w-0">
+        <main className="flex-1 flex flex-col min-w-0 min-h-0">
           {match && params.id ? (
             <ChatWindow chatId={parseInt(params.id)} />
           ) : (
@@ -79,6 +85,7 @@ export function ChatLayout() {
             </div>
           )}
         </main>
+        {renderSidebarAfterMain ? <ChatSidebar placement={sidebarPlacement} /> : null}
       </div>
 
       {/* Message Notifications */}

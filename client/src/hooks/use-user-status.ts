@@ -19,13 +19,10 @@ export function setUserStatus(
   status: string,
   lastSeen?: Date | string | null,
 ) {
+  const previous = userStatuses.get(userId);
   userStatuses.set(userId, {
     status: status === 'online' ? 'online' : 'offline',
-    lastSeen: lastSeen
-      ? new Date(lastSeen)
-      : status === 'offline'
-        ? new Date()
-        : userStatuses.get(userId)?.lastSeen ?? null,
+    lastSeen: lastSeen ? new Date(lastSeen) : previous?.lastSeen ?? null,
   });
   emit();
 }
@@ -37,7 +34,7 @@ export function setOnlineUsers(userIds: string[]) {
   // Mark previously-online users that aren't in this list as offline
   userStatuses.forEach((info, id) => {
     if (info.status === 'online' && !onlineSet.has(id)) {
-      userStatuses.set(id, { status: 'offline', lastSeen: new Date() });
+      userStatuses.set(id, { status: 'offline', lastSeen: info.lastSeen ?? null });
     }
   });
 

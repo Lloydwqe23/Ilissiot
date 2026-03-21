@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useRoute, useLocation } from "wouter";
 import { format, isToday, isYesterday } from "date-fns";
 import { Edit, LogOut, Settings, MoreVertical, ArrowLeft, Image, Mic, Video, Phone, FileText, Sticker, Pin, PinOff, LogOut as LeaveIcon, Users, BellOff, Bell, Megaphone } from "lucide-react";
@@ -20,6 +20,7 @@ import { ProfileSettings } from "./profile-settings";
 import { UserSearch } from "./user-search";
 import { Skeleton } from "@/components/ui/skeleton";
 import { resolveLanguage, translate } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 
 /** Small green dot shown on an avatar when the user is online. */
 function OnlineIndicator({ userId }: { userId: string | undefined }) {
@@ -48,11 +49,15 @@ function ChatSidebarItem({
   isActive,
   closeMobileSidebar,
   t,
+  compact = false,
+  draftText,
 }: {
   chat: any;
   isActive: boolean;
   closeMobileSidebar: () => void;
   t: (key: string) => string;
+  compact?: boolean;
+  draftText?: string;
 }) {
   const { user } = useAuth();
   const otherMember = !chat.isGroup
@@ -83,22 +88,23 @@ function ChatSidebarItem({
   // Check if this chat is pinned by the current user
   const myMembership = chat.members?.find((m: any) => m.userId === user?.id);
   const isPinned = !!myMembership?.pinnedAt;
+  const hasDraft = !!draftText?.trim();
 
   return (
-    <SidebarMenuItem key={chat.id} className="mb-1 relative group">
+    <SidebarMenuItem key={chat.id} className={cn("relative group", compact ? "mb-0 shrink-0" : "mb-1")}>
       <ContextMenu>
       <ContextMenuTrigger asChild>
       <Link
         href={`/chat/${chat.id}`}
         onClick={closeMobileSidebar}
-        className={`flex items-center gap-3 w-full p-3 rounded-xl transition-all duration-200 ${
+        className={`${compact ? 'flex items-center gap-2 w-[220px] p-2' : 'flex items-center gap-3 w-full p-3'} rounded-xl transition-all duration-200 ${
           isActive 
             ? 'bg-sidebar-accent dark:bg-sidebar-accent/60' 
             : 'hover:bg-sidebar-accent/70 dark:hover:bg-sidebar-accent/30'
         }`}
       >
         <div className="relative shrink-0">
-          <Avatar className="w-12 h-12 border border-black/5">
+          <Avatar className={`${compact ? 'w-9 h-9' : 'w-12 h-12'} border border-black/5`}>
             <AvatarImage src={avatarUrl || ""} />
             <AvatarFallback className="text-sm font-medium bg-primary/10 text-primary">
               {chat.isChannel ? <Megaphone className="w-5 h-5" /> : chat.isGroup ? <Users className="w-5 h-5" /> : initials}
@@ -107,25 +113,55 @@ function ChatSidebarItem({
           <OnlineIndicator userId={otherUserId} />
         </div>
 
+        {compact ? (
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2">
+              <span className="block truncate text-xs font-semibold text-sidebar-foreground">{displayName}</span>
+              {!hasDraft && lastMsg ? (
+                <span className="shrink-0 text-[10px] uppercase tracking-wide text-sidebar-foreground/50">
+                  {formatLastMessageTime(lastMsg.createdAt!)}
+                </span>
+              ) : null}
+            </div>
+            <span className="mt-0.5 block truncate text-[10px] text-sidebar-foreground/60">
+              {hasDraft
+                ? `${t("chat.draftPrefix")} \"${draftText}\"`
+                : lastMsg ? (() => {
+                const attachments: any[] = (lastMsg.attachments || []).filter((a: any) => a.type !== 'reply' && a.type !== 'forward');
+                if (lastMsg.content && lastMsg.content.trim()) {
+                  return stripFormatting(lastMsg.content);
+                }
+                if (attachments.length > 0) {
+                  const first = attachments[0];
+                  if (first.type?.startsWith('image/')) return t("chat.attachment.photo");
+                  if (first.type?.startsWith('video/')) return t("chat.attachment.video");
+                  if (first.type?.startsWith('audio/')) return t("chat.attachment.audio");
+                  return first.name || t("chat.attachment.file");
+                }
+                return t("chat.attachment.message");
+              })() : t("chat.startedAChat")}
+            </span>
+          </div>
+        ) : (
         <div className="flex-1 overflow-hidden">
           <div className="flex justify-between items-baseline mb-1">
             <span className="font-semibold truncate text-[15px] text-sidebar-foreground group-hover:text-sidebar-foreground flex items-center gap-1">
               {displayName}
               {chatMuted && <BellOff className="w-3 h-3 text-muted-foreground shrink-0" />}
             </span>
-            {lastMsg && (
+            {!hasDraft && lastMsg && (
               <span className="text-[11px] whitespace-nowrap ml-2 text-sidebar-foreground/50 group-hover:text-sidebar-foreground/80 flex items-center gap-1">
                 {isPinned && <Pin className="w-3 h-3 text-primary/60" />}
                 {formatLastMessageTime(lastMsg.createdAt!)}
               </span>
             )}
-            {!lastMsg && isPinned && (
+            {!hasDraft && !lastMsg && isPinned && (
               <span className="ml-2"><Pin className="w-3 h-3 text-primary/60" /></span>
             )}
           </div>
           <div className="flex justify-between items-center">
             <span className="text-[13px] truncate text-sidebar-foreground/60 group-hover:text-sidebar-foreground/80 flex items-center gap-1">
-              {lastMsg ? (() => {
+              {hasDraft ? `${t("chat.draftPrefix")} \"${draftText}\"` : lastMsg ? (() => {
                 const prefix = lastMsg.senderId === user?.id ? t("chat.youPrefix") : '';
                 const attachments: any[] = (lastMsg.attachments || []).filter((a: any) => a.type !== 'reply' && a.type !== 'forward');
                 const hasForward = (lastMsg.attachments || []).some((a: any) => a.type === 'forward');
@@ -162,6 +198,12 @@ function ChatSidebarItem({
               ) : null}
             </div>
           </div>
+        )}
+        {compact && chat.unreadCount ? (
+          <span className="inline-flex min-w-5 h-5 px-1.5 rounded-full items-center justify-center text-[10px] font-bold bg-primary text-primary-foreground">
+            {chat.unreadCount}
+          </span>
+        ) : null}
         </Link>
       </ContextMenuTrigger>
       <ContextMenuContent>
@@ -261,7 +303,7 @@ function ChatSidebarItem({
   );
 }
 
-export function ChatSidebar() {
+export function ChatSidebar({ placement = 'left' }: { placement?: 'left' | 'right' | 'top' | 'bottom' }) {
   const { user, logout } = useAuth();
   const language = resolveLanguage(user?.language);
   const t = (key: string) => translate(language, key);
@@ -272,17 +314,59 @@ export function ChatSidebar() {
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [drafts, setDrafts] = useState<Record<number, string>>({});
+  const isHorizontal = placement === 'top' || placement === 'bottom';
+
+  const syncDrafts = useCallback(() => {
+    if (!chats?.length || !user?.id) {
+      setDrafts({});
+      return;
+    }
+
+    const nextDrafts: Record<number, string> = {};
+    chats.forEach((chat) => {
+      const key = `chat_draft_${user.id}_${chat.id}`;
+      const value = localStorage.getItem(key)?.trim();
+      if (value) nextDrafts[chat.id] = value;
+    });
+    setDrafts(nextDrafts);
+  }, [chats, user?.id]);
+
+  useEffect(() => {
+    syncDrafts();
+  }, [syncDrafts]);
+
+  useEffect(() => {
+    const handleDraftUpdated = () => syncDrafts();
+    window.addEventListener('chat-draft-updated', handleDraftUpdated);
+    window.addEventListener('storage', handleDraftUpdated);
+    return () => {
+      window.removeEventListener('chat-draft-updated', handleDraftUpdated);
+      window.removeEventListener('storage', handleDraftUpdated);
+    };
+  }, [syncDrafts]);
 
   // Close mobile sidebar sheet when navigating to a chat
   const closeMobileSidebar = () => {
     if (isMobile) setOpenMobile(false);
   };
 
+  const sidebarClassName = placement === 'right'
+    ? "border-l border-sidebar-border bg-sidebar"
+    : placement === 'top'
+      ? "border-b border-sidebar-border bg-sidebar"
+      : placement === 'bottom'
+        ? "border-t border-sidebar-border bg-sidebar"
+        : "border-r border-sidebar-border bg-sidebar";
+
 
   return (
     <>
-      <Sidebar className="border-r border-sidebar-border bg-sidebar">
-        <SidebarHeader className="h-16 px-4 flex flex-row items-center justify-between border-b border-sidebar-border">
+      <Sidebar side={placement} className={sidebarClassName}>
+        <SidebarHeader className={cn(
+          "px-4 flex flex-row items-center justify-between border-b border-sidebar-border",
+          isHorizontal ? "h-12" : "h-16"
+        )}>
           <div className="flex items-center gap-3">
             {isMobile && (
               <Button variant="ghost" size="icon" className="w-8 h-8 rounded-full shrink-0" onClick={() => setOpenMobile(false)}>
@@ -294,31 +378,48 @@ export function ChatSidebar() {
               alt="Ilissiot" 
               className="w-8 h-8 rounded-lg shadow-sm"
             />
-            <span className="font-display font-bold text-lg tracking-tight text-sidebar-foreground">Ilissiot</span>
+            <span className={cn("font-display font-bold tracking-tight text-sidebar-foreground", isHorizontal ? "text-base" : "text-lg")}>Ilissiot</span>
           </div>
-          <Button variant="ghost" size="icon" className="w-8 h-8 rounded-full hover:bg-sidebar-accent dark:hover:bg-sidebar-accent/30" onClick={() => setSearchOpen(true)}>
-            <Edit className="w-4 h-4 text-sidebar-foreground/60" />
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="icon" className="w-8 h-8 rounded-full hover:bg-sidebar-accent dark:hover:bg-sidebar-accent/30" onClick={() => setSearchOpen(true)}>
+              <Edit className="w-4 h-4 text-sidebar-foreground/60" />
+            </Button>
+            {isHorizontal ? (
+              <Button variant="ghost" size="icon" className="w-8 h-8 rounded-full hover:bg-sidebar-accent dark:hover:bg-sidebar-accent/30" onClick={() => setSettingsOpen(true)}>
+                <Settings className="w-4 h-4 text-sidebar-foreground/60" />
+              </Button>
+            ) : null}
+          </div>
         </SidebarHeader>
 
-        <SidebarContent className="p-2 overflow-y-auto scrollbar-hide">
-          <SidebarGroup>
+        <SidebarContent className={cn("p-2 scrollbar-hide", isHorizontal ? "overflow-x-auto overflow-y-hidden" : "overflow-y-auto") }>
+          <SidebarGroup className={cn(isHorizontal ? "p-0" : undefined)}>
             <SidebarGroupContent>
-              <SidebarMenu>
+              <SidebarMenu className={cn(isHorizontal ? "flex-row gap-2" : undefined)}>
                 {isLoading ? (
                   Array.from({ length: 5 }).map((_, i) => (
-                    <SidebarMenuItem key={i} className="mb-1">
-                      <div className="flex items-center gap-3 p-2">
-                        <Skeleton className="w-12 h-12 rounded-full" />
-                        <div className="space-y-2 flex-1">
-                          <Skeleton className="h-4 w-24" />
-                          <Skeleton className="h-3 w-32" />
+                    <SidebarMenuItem key={i} className={cn(isHorizontal ? "mb-0 shrink-0" : "mb-1")}>
+                      {isHorizontal ? (
+                        <div className="flex w-[220px] shrink-0 items-center gap-2 p-2">
+                          <Skeleton className="w-9 h-9 rounded-full" />
+                          <div className="flex-1 space-y-1">
+                            <Skeleton className="h-3 w-24" />
+                            <Skeleton className="h-3 w-32" />
+                          </div>
                         </div>
-                      </div>
+                      ) : (
+                        <div className="flex items-center gap-3 p-2">
+                          <Skeleton className="w-12 h-12 rounded-full" />
+                          <div className="space-y-2 flex-1">
+                            <Skeleton className="h-4 w-24" />
+                            <Skeleton className="h-3 w-32" />
+                          </div>
+                        </div>
+                      )}
                     </SidebarMenuItem>
                   ))
                 ) : chats?.length === 0 ? (
-                  <div className="text-center p-6 mt-10">
+                  <div className={cn("text-center p-6", isHorizontal ? "mt-0" : "mt-10")}>
                     <div className="w-16 h-16 bg-sidebar-accent rounded-full flex items-center justify-center mx-auto mb-4">
                       <Edit className="w-8 h-8 text-sidebar-foreground/30" />
                     </div>
@@ -335,6 +436,8 @@ export function ChatSidebar() {
                         isActive={isActive}
                         closeMobileSidebar={closeMobileSidebar}
                         t={t}
+                        compact={isHorizontal}
+                        draftText={drafts[chat.id]}
                       />
                     );
                   })
@@ -344,7 +447,7 @@ export function ChatSidebar() {
           </SidebarGroup>
         </SidebarContent>
 
-        <SidebarFooter className="p-4 border-t border-sidebar-border">
+        <SidebarFooter className={cn("p-4 border-t border-sidebar-border", isHorizontal ? "hidden" : undefined)}>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="w-full flex justify-between items-center px-2 py-6 rounded-xl hover:bg-sidebar-accent dark:hover:bg-sidebar-accent/30">

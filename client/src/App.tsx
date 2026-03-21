@@ -79,6 +79,9 @@ function ThemeInitializer() {
     document.documentElement.classList.remove(...textSizeClasses);
     document.documentElement.classList.add(`text-size-${user?.textSize || 'normal'}`);
 
+    // Keep layout preference accessible globally.
+    document.documentElement.setAttribute('data-sidebar-placement', user?.sidebarPlacement || 'left');
+
     // Apply selected app language to the document and remember it for logged-out screens.
     const appLanguage = resolveLanguage(user?.language);
     document.documentElement.lang = appLanguage;

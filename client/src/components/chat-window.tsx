@@ -1237,6 +1237,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const chatMuted = useChatMuted(chatId);
 
   const [inputValue, setInputValue] = useState("");
+  const draftStorageKey = `chat_draft_${user?.id || 'guest'}_${chatId}`;
   const [attachments, setAttachments] = useState<Array<{name: string; url: string; type: string}>>([]);
   const [uploading, setUploading] = useState(false);
   const [showStickerPicker, setShowStickerPicker] = useState(false);
@@ -1378,6 +1379,24 @@ export function ChatWindow({ chatId }: { chatId: number }) {
     setChatBgId(getChatBackground(chatId));
     setCustomBgUrl(getCustomBackgroundUrl(chatId));
   }, [chatId]);
+
+  // Restore saved draft for this chat when switching chats.
+  useEffect(() => {
+    if (editingMessageId) return;
+    const savedDraft = localStorage.getItem(draftStorageKey);
+    setInputValue(savedDraft || '');
+  }, [draftStorageKey, editingMessageId]);
+
+  // Persist draft while typing.
+  useEffect(() => {
+    if (editingMessageId) return;
+    if (inputValue.trim()) {
+      localStorage.setItem(draftStorageKey, inputValue);
+    } else {
+      localStorage.removeItem(draftStorageKey);
+    }
+    window.dispatchEvent(new CustomEvent('chat-draft-updated'));
+  }, [draftStorageKey, inputValue, editingMessageId]);
 
   // Jump to date handler — finds the first message on or after the selected date and scrolls to it
   const handleJumpToDate = (date: Date | undefined) => {
@@ -2054,6 +2073,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
     }, {
       onSuccess: () => {
         setInputValue("");
+        localStorage.removeItem(draftStorageKey);
         setAttachments([]);
         setReplyToMessage(null);
       }
@@ -2634,7 +2654,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
   const { data: blockStatus } = useBlockStatus(otherMember?.userId);
   const isChannelAdmin = !!(chat?.isChannel && chat.members?.some((m: any) => m.userId === user?.id && m.role === 'admin'));
   const canPostInChannel = !chat?.isChannel || chat.members?.some((m: any) => m.userId === user?.id && m.role === 'admin');
-  const commentsAllowed = !chat?.isChannel || chat.commentsEnabled !== false;
+  const commentsAllowed = !!chat?.isChannel && chat.commentsEnabled !== false;
   const blockMut = useBlockUser();
   const unblockMut = useUnblockUser();
 
@@ -2686,7 +2706,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
 
   const cancelEditingMessage = () => {
     setEditingMessageId(null);
-    setInputValue('');
+    setInputValue(localStorage.getItem(draftStorageKey) || '');
     setAttachments([]);
   };
 
@@ -2697,7 +2717,7 @@ export function ChatWindow({ chatId }: { chatId: number }) {
       {
         onSuccess: () => {
           setEditingMessageId(null);
-          setInputValue('');
+          setInputValue(localStorage.getItem(draftStorageKey) || '');
           setAttachments([]);
         },
         onError: (error: any) => {
