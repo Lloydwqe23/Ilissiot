@@ -80,6 +80,7 @@ export function UserProfileScreen({ navigation, route }: Props) {
     profileUser?.status || null,
     profileUser?.lastSeen || null,
   );
+  const isBlockActionLoading = blockUser.isPending || unblockUser.isPending;
 
   const mediaData = useMemo(() => {
     const audioVideo: Array<{ messageId: number; attachment: Attachment; createdAt: string | null | undefined }> = [];
@@ -209,13 +210,27 @@ export function UserProfileScreen({ navigation, route }: Props) {
       {
         text: 'Block',
         style: 'destructive',
-        onPress: () => blockUser.mutate(userId),
+        onPress: async () => {
+          try {
+            await blockUser.mutateAsync(userId);
+            Alert.alert('Blocked', `${displayName} has been blocked.`);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Could not block this user.';
+            Alert.alert('Block failed', message);
+          }
+        },
       },
     ]);
   };
 
-  const handleUnblock = () => {
-    unblockUser.mutate(userId);
+  const handleUnblock = async () => {
+    try {
+      await unblockUser.mutateAsync(userId);
+      Alert.alert('Unblocked', `${displayName} has been unblocked.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not unblock this user.';
+      Alert.alert('Unblock failed', message);
+    }
   };
 
   const handleMessage = async () => {
@@ -337,6 +352,7 @@ export function UserProfileScreen({ navigation, route }: Props) {
         <TouchableOpacity
           style={[styles.blockButton, { borderColor: colors.destructive }]}
           onPress={blockStatus?.blocked ? handleUnblock : handleBlock}
+          disabled={isBlockActionLoading}
         >
           <Ionicons
             name={blockStatus?.blocked ? 'ban' : 'ban-outline'}

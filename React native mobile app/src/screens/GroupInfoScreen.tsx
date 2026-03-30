@@ -7,9 +7,11 @@ import {
   Image,
   ScrollView,
   Alert,
-  FlatList,
+  Modal,
+  Pressable,
   Share,
   ActivityIndicator,
+  TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { setStringAsync } from 'expo-clipboard';
@@ -22,6 +24,8 @@ import {
   useUpdateGroupChat,
   useRemoveGroupMember,
   useUpdateMemberRole,
+  useUpdateMemberTitle,
+  useUpdateMemberPermissions,
   useInviteLinks,
   useCreateInviteLink,
   useRevokeInviteLink,
@@ -31,11 +35,29 @@ import { getThemeColors } from '../theme';
 import { getChatName, getChatAvatar, getDisplayName, getInitials } from '../utils/helpers';
 import { getFullUrl, API_BASE_URL } from '../api';
 import { ScreenHeader } from '../components/ScreenHeader';
+import type { ChatMember } from '../types';
 
 type Props = {
   navigation: any;
   route: { params: { chatId: number } };
 };
+
+const DEFAULT_MEMBER_PERMISSIONS: Record<string, boolean> = {
+  canPin: true,
+  canInvite: true,
+  canCreatePolls: true,
+  canRemove: false,
+  canEditInfo: false,
+  canDeleteMessages: false,
+};
+
+const PERMISSION_OPTIONS: Array<{ key: string; label: string; description: string }> = [
+  { key: 'canInvite', label: 'Invite members', description: 'Add new members to the group' },
+  { key: 'canRemove', label: 'Remove members', description: 'Remove members from the group' },
+  { key: 'canEditInfo', label: 'Edit group info', description: 'Change group name and icon' },
+  { key: 'canDeleteMessages', label: 'Delete messages', description: "Delete other members' messages" },
+  { key: 'canCreatePolls', label: 'Create polls', description: 'Create polls in the group' },
+];
 
 export function GroupInfoScreen({ navigation, route }: Props) {
   const { chatId } = route.params;
@@ -46,12 +68,20 @@ export function GroupInfoScreen({ navigation, route }: Props) {
   const updateGroupChat = useUpdateGroupChat();
   const removeMember = useRemoveGroupMember();
   const updateMemberRole = useUpdateMemberRole();
+  const updateMemberTitle = useUpdateMemberTitle();
+  const updateMemberPermissions = useUpdateMemberPermissions();
   const { data: inviteLinks } = useInviteLinks(chatId);
   const createInviteLink = useCreateInviteLink();
   const revokeInviteLink = useRevokeInviteLink();
   const { data: pinnedMessages } = usePinnedMessages(chatId);
   const colors = getThemeColors(user?.theme, user?.colorTheme);
   const [uploadingGroupAvatar, setUploadingGroupAvatar] = useState(false);
+  const [settingsMember, setSettingsMember] = useState<ChatMember | null>(null);
+  const [memberRoleDraft, setMemberRoleDraft] = useState<'admin' | 'member'>('member');
+  const [memberTitleDraft, setMemberTitleDraft] = useState('');
+  const [memberPermissionsDraft, setMemberPermissionsDraft] = useState<Record<string, boolean>>(
+    DEFAULT_MEMBER_PERMISSIONS,
+  );
 
   if (!chat || !user) return null;
 
@@ -61,6 +91,11 @@ export function GroupInfoScreen({ navigation, route }: Props) {
   const isCreator = chat.creatorId === user.id;
   const chatName = getChatName(chat, user.id);
   const chatAvatar = getChatAvatar(chat, user.id);
+  const activeInviteLinks = (inviteLinks || []).filter((link) => link.isActive !== false);
+  const isSavingMemberSettings =
+    updateMemberRole.isPending ||
+    updateMemberTitle.isPending ||
+    updateMemberPermissions.isPending;
 
   const handleLeave = () => {
     Alert.alert('Leave Group', 'Are you sure you want to leave this group?', [
@@ -101,9 +136,80 @@ export function GroupInfoScreen({ navigation, route }: Props) {
     ]);
   };
 
-  const handleToggleAdmin = (userId: string, currentRole: string) => {
-    const newRole = currentRole === 'admin' ? 'member' : 'admin';
-    updateMemberRole.mutate({ chatId, userId, role: newRole });
+  const handleOpenMemberSettings = (member: ChatMember) => {
+    const memberRole = member.role === 'admin' ? 'admin' : 'member';
+    const currentPermissions = member.permissions && typeof member.permissions === 'object'
+      ? member.permissions
+      : {};
+
+    setSettingsMember(member);
+    setMemberRoleDraft(memberRole);
+    setMemberTitleDraft(member.title || '');
+    setMemberPermissionsDraft({
+      ...DEFAULT_MEMBER_PERMISSIONS,
+      ...currentPermissions,
+    });
+  };
+
+  const handleCloseMemberSettings = () => {
+    setSettingsMember(null);
+  };
+
+  const togglePermission = (key: string) => {
+    setMemberPermissionsDraft((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
+
+  const handleSaveMemberSettings = async () => {
+    if (!settingsMember) return;
+
+    try {
+      const userId = settingsMember.userId;
+      const currentRole = settingsMember.role === 'admin' ? 'admin' : 'member';
+      const currentTitle = settingsMember.title || '';
+      const newTitle = memberTitleDraft.trim();
+      const currentPerms = settingsMember.permissions && typeof settingsMember.permissions === 'object'
+        ? settingsMember.permissions
+        : {};
+
+      if (memberRoleDraft !== currentRole) {
+        await updateMemberRole.mutateAsync({
+          chatId,
+          userId,
+          role: memberRoleDraft,
+        });
+      }
+
+      if (newTitle !== currentTitle) {
+        await updateMemberTitle.mutateAsync({
+          chatId,
+          userId,
+          title: newTitle || null,
+        });
+      }
+
+      if (memberRoleDraft !== 'admin') {
+        const permissionsChanged = PERMISSION_OPTIONS.some(
+          (permission) =>
+            Boolean(memberPermissionsDraft[permission.key]) !== Boolean(currentPerms[permission.key]),
+        );
+
+        if (permissionsChanged) {
+          await updateMemberPermissions.mutateAsync({
+            chatId,
+            userId,
+            permissions: memberPermissionsDraft,
+          });
+        }
+      }
+
+      setSettingsMember(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to update member settings.';
+      Alert.alert('Save failed', message);
+    }
   };
 
   const handleCreateInviteLink = async () => {
@@ -112,6 +218,24 @@ export function GroupInfoScreen({ navigation, route }: Props) {
       const url = `${API_BASE_URL}/invite/${(link as any).token}`;
       Share.share({ message: `Join our group on Ilissiot: ${url}` });
     } catch (err) {}
+  };
+
+  const handleRevokeInviteLink = (token: string) => {
+    Alert.alert('Delete Invite Link', 'Delete this invite link?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await revokeInviteLink.mutateAsync({ chatId, token });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Could not delete invite link.';
+            Alert.alert('Delete failed', message);
+          }
+        },
+      },
+    ]);
   };
 
   const handleChangeGroupIcon = async () => {
@@ -124,7 +248,7 @@ export function GroupInfoScreen({ navigation, route }: Props) {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       legacy: true,
       aspect: [1, 1],
@@ -260,10 +384,10 @@ export function GroupInfoScreen({ navigation, route }: Props) {
         </View>
 
         {/* Invite links */}
-        {inviteLinks && inviteLinks.length > 0 && (
+        {activeInviteLinks.length > 0 && (
           <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Invite Links</Text>
-            {inviteLinks.map((link) => (
+            {activeInviteLinks.map((link) => (
               <View key={link.id} style={[styles.inviteLinkRow, { borderBottomColor: colors.border }]}>
                 <View style={styles.inviteLinkInfo}>
                   <Text style={[styles.inviteLinkToken, { color: colors.primary }]} numberOfLines={1}>
@@ -275,6 +399,7 @@ export function GroupInfoScreen({ navigation, route }: Props) {
                 </View>
                 <View style={styles.inviteLinkActions}>
                   <TouchableOpacity
+                    disabled={revokeInviteLink.isPending}
                     onPress={async () => {
                       const full = `${API_BASE_URL}/invite/${link.token}`;
                       await setStringAsync(full);
@@ -283,9 +408,14 @@ export function GroupInfoScreen({ navigation, route }: Props) {
                   >
                     <Ionicons name="copy-outline" size={18} color={colors.primary} />
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={() => revokeInviteLink.mutate({ chatId, token: link.token })}>
-                    <Ionicons name="trash" size={18} color={colors.destructive} />
-                  </TouchableOpacity>
+                  {isAdmin && (
+                    <TouchableOpacity
+                      disabled={revokeInviteLink.isPending}
+                      onPress={() => handleRevokeInviteLink(link.token)}
+                    >
+                      <Ionicons name="trash" size={18} color={colors.destructive} />
+                    </TouchableOpacity>
+                  )}
                 </View>
               </View>
             ))}
@@ -348,14 +478,10 @@ export function GroupInfoScreen({ navigation, route }: Props) {
                 {isAdmin && !isCurrentUser && !isMemberCreator && (
                   <View style={styles.memberActions}>
                     <TouchableOpacity
-                      onPress={() => handleToggleAdmin(member.userId, member.role || 'member')}
+                      onPress={() => handleOpenMemberSettings(member)}
                       style={styles.memberActionButton}
                     >
-                      <Ionicons
-                        name={isMemberAdmin ? 'arrow-down' : 'arrow-up'}
-                        size={18}
-                        color={colors.primary}
-                      />
+                      <Ionicons name="settings-outline" size={18} color={colors.primary} />
                     </TouchableOpacity>
                     <TouchableOpacity
                       onPress={() => handleRemoveMember(member.userId, memberName)}
@@ -384,6 +510,151 @@ export function GroupInfoScreen({ navigation, route }: Props) {
           )}
         </View>
       </ScrollView>
+
+      <Modal
+        visible={!!settingsMember}
+        transparent
+        animationType="fade"
+        onRequestClose={handleCloseMemberSettings}
+      >
+        <View style={styles.modalRoot}>
+          <Pressable
+            style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}
+            onPress={handleCloseMemberSettings}
+          />
+          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Member Settings</Text>
+            <Text style={[styles.modalSubtitle, { color: colors.textMuted }]}>
+              {settingsMember ? getDisplayName(settingsMember.user) : ''}
+            </Text>
+
+            <Text style={[styles.inputLabel, { color: colors.text }]}>Role</Text>
+            <View style={styles.roleButtonsRow}>
+              <TouchableOpacity
+                style={[
+                  styles.roleButton,
+                  {
+                    borderColor: colors.border,
+                    backgroundColor: memberRoleDraft === 'admin' ? colors.primary : colors.surface,
+                  },
+                ]}
+                onPress={() => setMemberRoleDraft('admin')}
+                disabled={isSavingMemberSettings}
+              >
+                <Ionicons
+                  name="shield-checkmark"
+                  size={14}
+                  color={memberRoleDraft === 'admin' ? colors.primaryForeground : colors.primary}
+                />
+                <Text
+                  style={[
+                    styles.roleButtonText,
+                    { color: memberRoleDraft === 'admin' ? colors.primaryForeground : colors.text },
+                  ]}
+                >
+                  Admin
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.roleButton,
+                  {
+                    borderColor: colors.border,
+                    backgroundColor: memberRoleDraft === 'member' ? colors.primary : colors.surface,
+                  },
+                ]}
+                onPress={() => setMemberRoleDraft('member')}
+                disabled={isSavingMemberSettings}
+              >
+                <Ionicons
+                  name="person"
+                  size={14}
+                  color={memberRoleDraft === 'member' ? colors.primaryForeground : colors.primary}
+                />
+                <Text
+                  style={[
+                    styles.roleButtonText,
+                    { color: memberRoleDraft === 'member' ? colors.primaryForeground : colors.text },
+                  ]}
+                >
+                  Member
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={[styles.inputLabel, { color: colors.text }]}>Custom Title</Text>
+            <TextInput
+              style={[styles.modalInput, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.text }]}
+              placeholder="Optional title"
+              placeholderTextColor={colors.textMuted}
+              value={memberTitleDraft}
+              onChangeText={setMemberTitleDraft}
+              editable={!isSavingMemberSettings}
+            />
+
+            <Text style={[styles.inputLabel, { color: colors.text }]}>Permissions</Text>
+            {memberRoleDraft === 'admin' ? (
+              <Text style={[styles.permissionsHint, { color: colors.textMuted }]}>Admins have all permissions.</Text>
+            ) : (
+              <View style={styles.permissionsList}>
+                {PERMISSION_OPTIONS.map((permission) => {
+                  const enabled = Boolean(memberPermissionsDraft[permission.key]);
+                  return (
+                    <TouchableOpacity
+                      key={permission.key}
+                      style={[styles.permissionRow, { borderColor: colors.border }]}
+                      onPress={() => togglePermission(permission.key)}
+                      disabled={isSavingMemberSettings}
+                    >
+                      <View
+                        style={[
+                          styles.permissionCheck,
+                          {
+                            borderColor: enabled ? colors.primary : colors.border,
+                            backgroundColor: enabled ? colors.primary : 'transparent',
+                          },
+                        ]}
+                      >
+                        {enabled && <Ionicons name="checkmark" size={12} color={colors.primaryForeground} />}
+                      </View>
+                      <View style={styles.permissionTextWrap}>
+                        <Text style={[styles.permissionLabel, { color: colors.text }]}>{permission.label}</Text>
+                        <Text style={[styles.permissionDescription, { color: colors.textMuted }]}>
+                          {permission.description}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalActionButton, styles.modalCancelButton, { borderColor: colors.border }]}
+                onPress={handleCloseMemberSettings}
+                disabled={isSavingMemberSettings}
+              >
+                <Text style={[styles.modalActionText, { color: colors.text }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.modalActionButton,
+                  styles.modalSaveButton,
+                  { backgroundColor: colors.primary },
+                  isSavingMemberSettings && styles.modalButtonDisabled,
+                ]}
+                onPress={handleSaveMemberSettings}
+                disabled={isSavingMemberSettings}
+              >
+                <Text style={[styles.modalActionText, { color: colors.primaryForeground }]}>
+                  {isSavingMemberSettings ? 'Saving...' : 'Save'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -500,4 +771,116 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   dangerText: { fontSize: 15, fontWeight: '500' },
+  modalRoot: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  modalCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 16,
+    gap: 10,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  modalSubtitle: {
+    fontSize: 13,
+    marginBottom: 4,
+  },
+  inputLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  roleButtonsRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  roleButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
+  },
+  roleButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  permissionsHint: {
+    fontSize: 12,
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
+  permissionsList: {
+    gap: 8,
+  },
+  permissionRow: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  permissionCheck: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  permissionTextWrap: {
+    flex: 1,
+  },
+  permissionLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  permissionDescription: {
+    fontSize: 11,
+    marginTop: 1,
+  },
+  modalActions: {
+    marginTop: 8,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  modalActionButton: {
+    flex: 1,
+    paddingVertical: 11,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCancelButton: {
+    borderWidth: 1,
+  },
+  modalSaveButton: {
+    borderWidth: 0,
+  },
+  modalActionText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  modalButtonDisabled: {
+    opacity: 0.7,
+  },
 });

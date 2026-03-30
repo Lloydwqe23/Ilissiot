@@ -1,7 +1,8 @@
 import { getFullUrl } from '../api';
-import type { Chat, User } from '../types';
+import type { Attachment, Chat, Message, User } from '../types';
 
 export function getChatName(chat: Chat, currentUserId: string): string {
+  if (chat.isChannel) return chat.name || 'Channel';
   if (chat.isGroup) return chat.name || 'Group Chat';
   const otherMember = chat.members.find((m) => m.userId !== currentUserId);
   if (!otherMember?.user) return 'Chat';
@@ -9,7 +10,7 @@ export function getChatName(chat: Chat, currentUserId: string): string {
 }
 
 export function getChatAvatar(chat: Chat, currentUserId: string): string | null {
-  if (chat.isGroup) return chat.avatarUrl ? getFullUrl(chat.avatarUrl) : null;
+  if (chat.isChannel || chat.isGroup) return chat.avatarUrl ? getFullUrl(chat.avatarUrl) : null;
   const otherMember = chat.members.find((m) => m.userId !== currentUserId);
   return otherMember?.user?.profileImageUrl
     ? getFullUrl(otherMember.user.profileImageUrl)
@@ -17,7 +18,7 @@ export function getChatAvatar(chat: Chat, currentUserId: string): string | null 
 }
 
 export function getOtherUser(chat: Chat, currentUserId: string): User | null {
-  if (chat.isGroup) return null;
+  if (chat.isChannel || chat.isGroup) return null;
   const otherMember = chat.members.find((m) => m.userId !== currentUserId);
   return otherMember?.user || null;
 }
@@ -78,4 +79,62 @@ export function formatPreview(content: string | null | undefined): string {
     .replace(/\|\|(.+?)\|\|/g, '[spoiler]')
     .replace(/\[(.+?)\]\((.+?)\)/g, '$1')
     .replace(/^> /gm, '');
+}
+
+const IMAGE_EXT_RE = /(\.jpg|\.jpeg|\.png|\.gif|\.webp|\.bmp|\.heic|\.heif|\.jfif)(\?|$)/i;
+const VIDEO_EXT_RE = /(\.mp4|\.mov|\.webm|\.m4v|\.avi|\.mkv)(\?|$)/i;
+const AUDIO_EXT_RE = /(\.mp3|\.m4a|\.aac|\.wav|\.ogg|\.flac|\.opus|\.webm)(\?|$)/i;
+
+function getAttachmentPreviewLabel(attachment: Attachment): string {
+  const type = (attachment.type || '').toLowerCase();
+  const name = attachment.name || '';
+  const lowerName = name.toLowerCase();
+  const lowerUrl = (attachment.url || '').toLowerCase();
+
+  const isImage = type.startsWith('image/') || IMAGE_EXT_RE.test(lowerName) || IMAGE_EXT_RE.test(lowerUrl);
+  const isVideo = type.startsWith('video/') || VIDEO_EXT_RE.test(lowerName) || VIDEO_EXT_RE.test(lowerUrl);
+  const isAudio = type.startsWith('audio/') || AUDIO_EXT_RE.test(lowerName) || AUDIO_EXT_RE.test(lowerUrl);
+
+  if (type === 'sticker') return '😀 Sticker';
+  if (type.startsWith('call/')) return '📞 Call';
+  if (isImage) return '🖼 Photo';
+  if (isVideo) return '🎬 Video';
+  if (isAudio) return '🎵 Audio';
+
+  return name.trim() ? `📄 ${name}` : '📎 File';
+}
+
+export function getMessagePreviewText(
+  message: Message | null | undefined,
+  currentUserId?: string,
+  options?: { includeGroupSender?: boolean }
+): string {
+  if (!message) return '';
+
+  let prefix = '';
+  if (currentUserId && message.senderId === currentUserId) {
+    prefix = 'You: ';
+  } else if (options?.includeGroupSender) {
+    const senderName = getDisplayName(message.sender);
+    if (senderName && senderName !== 'User') {
+      prefix = `${senderName}: `;
+    }
+  }
+
+  const attachments = (message.attachments || []).filter(
+    (attachment) => attachment.type !== 'reply' && attachment.type !== 'forward'
+  );
+  const hasForward = (message.attachments || []).some((attachment) => attachment.type === 'forward');
+  const forwardPrefix = hasForward ? '↗ ' : '';
+
+  const content = formatPreview(message.content).trim();
+  if (content) {
+    return `${prefix}${forwardPrefix}${content}`;
+  }
+
+  if (attachments.length > 0) {
+    return `${prefix}${forwardPrefix}${getAttachmentPreviewLabel(attachments[0])}`;
+  }
+
+  return `${prefix}${forwardPrefix}Message`;
 }

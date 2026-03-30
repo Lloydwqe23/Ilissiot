@@ -1,6 +1,7 @@
 import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { StyleSheet } from 'react-native';
 import { ChatListScreen } from '../screens/ChatListScreen';
 import { ChatWindowScreen } from '../screens/ChatWindowScreen';
 import { UserSearchScreen } from '../screens/UserSearchScreen';
@@ -23,17 +24,46 @@ export type RootStackParamList = {
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-export function AppNavigator() {
+type AppNavigatorProps = {
+  onActiveChatChange?: (chatId: number | null) => void;
+};
+
+export function AppNavigator({ onActiveChatChange }: AppNavigatorProps) {
+  const navigationRef = useNavigationContainerRef<RootStackParamList>();
+
+  const emitActiveChat = React.useCallback(() => {
+    const currentRoute = navigationRef.getCurrentRoute();
+
+    if (!currentRoute || currentRoute.name !== 'ChatWindow') {
+      onActiveChatChange?.(null);
+      return;
+    }
+
+    const params = currentRoute.params as RootStackParamList['ChatWindow'] | undefined;
+    const chatId = typeof params?.chatId === 'number' ? params.chatId : null;
+    onActiveChatChange?.(chatId);
+  }, [navigationRef, onActiveChatChange]);
+
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef} onReady={emitActiveChat} onStateChange={emitActiveChat}>
       <Stack.Navigator
         screenOptions={{
           headerShown: false,
-          animation: 'slide_from_right',
+          animation: 'none',
+          gestureEnabled: true,
         }}
       >
         <Stack.Screen name="ChatList" component={ChatListScreen} />
-        <Stack.Screen name="ChatWindow" component={ChatWindowScreen} />
+        <Stack.Screen
+          name="ChatWindow"
+          component={ChatWindowScreen}
+          options={{
+            gestureEnabled: false,
+            animation: 'none',
+            presentation: 'transparentModal',
+            contentStyle: styles.transparentCard,
+          }}
+        />
         <Stack.Screen name="UserSearch" component={UserSearchScreen} />
         <Stack.Screen name="Profile" component={ProfileScreen} />
         <Stack.Screen name="GroupInfo" component={GroupInfoScreen} />
@@ -44,3 +74,9 @@ export function AppNavigator() {
     </NavigationContainer>
   );
 }
+
+const styles = StyleSheet.create({
+  transparentCard: {
+    backgroundColor: 'transparent',
+  },
+});

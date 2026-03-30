@@ -11,7 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../hooks/useAuth';
 import { usePinnedMessages, useChat } from '../hooks/useChats';
 import { getThemeColors } from '../theme';
-import { getChatName, getInitials, formatFullTime, getDisplayName } from '../utils/helpers';
+import { getChatName, getInitials, formatFullTime, getDisplayName, getMessagePreviewText } from '../utils/helpers';
 import { getFullUrl } from '../api';
 import type { PinnedMessage } from '../types';
 import { ScreenHeader } from '../components/ScreenHeader';
@@ -60,7 +60,7 @@ export function PinnedMessagesScreen({ navigation, route }: Props) {
           </View>
 
           <Text style={[styles.preview, { color: colors.textSecondary }]} numberOfLines={2}>
-            {msg.content || (msg.attachments?.length ? '📎 Attachment' : 'Pinned message')}
+            {getMessagePreviewText(msg) || 'Pinned message'}
           </Text>
         </View>
       </TouchableOpacity>

@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '../api';
-import type { Chat, User, InviteLink, PinnedMessage } from '../types';
+import type { Chat, User, InviteLink, PinnedMessage, ChannelComment } from '../types';
 
 export function useChats() {
   return useQuery<Chat[]>({
@@ -35,6 +35,36 @@ export function useCreateGroupChat() {
   });
 }
 
+export function useCreateChannel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { name: string }) =>
+      apiRequest<Chat>('/api/chats/channel', { method: 'POST', body: data }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['/api/chats'] }),
+  });
+}
+
+export function useSearchChannels(query: string) {
+  const trimmed = query.trim();
+  return useQuery<Array<{ id: number; name: string | null; avatarUrl: string | null; memberCount: number; isJoined: boolean }>>({
+    queryKey: ['/api/channels/search', trimmed],
+    queryFn: () => apiRequest(`/api/channels/search?q=${encodeURIComponent(trimmed)}`),
+    enabled: trimmed.length > 0,
+  });
+}
+
+export function useJoinChannel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (chatId: number) =>
+      apiRequest<Chat>(`/api/channels/${chatId}/join`, { method: 'POST' }),
+    onSuccess: (chat) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/chats'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/chats', chat.id] });
+    },
+  });
+}
+
 export function useUpdateGroupChat() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -59,8 +89,8 @@ export function useDeleteChat() {
 export function useAddGroupMembers() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ chatId, memberIds }: { chatId: number; memberIds: string[] }) =>
-      apiRequest(`/api/chats/${chatId}/members`, { method: 'POST', body: { memberIds } }),
+    mutationFn: ({ chatId, userIds }: { chatId: number; userIds: string[] }) =>
+      apiRequest(`/api/chats/${chatId}/members`, { method: 'POST', body: { userIds } }),
     onSuccess: (_, v) => {
       queryClient.invalidateQueries({ queryKey: ['/api/chats'] });
       queryClient.invalidateQueries({ queryKey: ['/api/chats', v.chatId] });
@@ -116,6 +146,7 @@ export function useBlockUser() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/chats'] });
       queryClient.invalidateQueries({ queryKey: ['/api/users/blocked'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/users/block-status'] });
     },
   });
 }
@@ -127,6 +158,8 @@ export function useUnblockUser() {
       apiRequest(`/api/users/${userId}/unblock`, { method: 'POST' }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/users/blocked'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/users/block-status'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/chats'] });
     },
   });
 }
@@ -209,7 +242,7 @@ export function useUnpinMessage() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ chatId, messageId }: { chatId: number; messageId: number }) =>
-      apiRequest(`/api/chats/${chatId}/messages/${messageId}/unpin`, { method: 'DELETE' }),
+      apiRequest(`/api/chats/${chatId}/messages/${messageId}/pin`, { method: 'DELETE' }),
     onSuccess: (_, v) => {
       queryClient.invalidateQueries({ queryKey: ['/api/chats', v.chatId, 'pinned-messages'] });
     },
@@ -228,7 +261,7 @@ export function useInviteLinks(chatId: number | null) {
 export function useCreateInviteLink() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ chatId, ...data }: { chatId: number; expiresIn?: string; maxUses?: number }) =>
+    mutationFn: ({ chatId, ...data }: { chatId: number; expiresAt?: string; maxUses?: number }) =>
       apiRequest(`/api/chats/${chatId}/invite-links`, { method: 'POST', body: data }),
     onSuccess: (_, v) => {
       queryClient.invalidateQueries({ queryKey: ['/api/chats', v.chatId, 'invite-links'] });
@@ -239,10 +272,14 @@ export function useCreateInviteLink() {
 export function useRevokeInviteLink() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ chatId, token }: { chatId: number; token: string }) =>
-      apiRequest(`/api/chats/${chatId}/invite-links/${token}`, { method: 'DELETE' }),
+    mutationFn: ({ chatId, token }: { chatId?: number; token: string }) =>
+      apiRequest(`/api/invite-links/${token}`, { method: 'DELETE' }),
     onSuccess: (_, v) => {
-      queryClient.invalidateQueries({ queryKey: ['/api/chats', v.chatId, 'invite-links'] });
+      if (v.chatId) {
+        queryClient.invalidateQueries({ queryKey: ['/api/chats', v.chatId, 'invite-links'] });
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['/api/chats'] });
+      }
     },
   });
 }
@@ -251,7 +288,7 @@ export function useJoinViaInviteLink() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (token: string) =>
-      apiRequest(`/api/invite/${token}/join`, { method: 'POST' }),
+      apiRequest(`/api/invite-links/${token}/join`, { method: 'POST' }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['/api/chats'] }),
   });
 }
@@ -286,6 +323,69 @@ export function useUpdateMemberPermissions() {
       apiRequest(`/api/chats/${chatId}/members/${userId}/permissions`, { method: 'PATCH', body: { permissions } }),
     onSuccess: (_, v) => {
       queryClient.invalidateQueries({ queryKey: ['/api/chats', v.chatId] });
+    },
+  });
+}
+
+// Channel comments
+export function useChannelCommentsSetting() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ chatId, enabled }: { chatId: number; enabled: boolean }) =>
+      apiRequest(`/api/chats/${chatId}/comments-enabled`, {
+        method: 'PATCH',
+        body: { enabled },
+      }),
+    onSuccess: (_, v) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/chats'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/chats', v.chatId] });
+    },
+  });
+}
+
+export function useComments(messageId: number | null) {
+  return useQuery<ChannelComment[]>({
+    queryKey: ['/api/messages', messageId, 'comments'],
+    queryFn: () => apiRequest<ChannelComment[]>(`/api/messages/${messageId}/comments`),
+    enabled: !!messageId,
+  });
+}
+
+export function useAddComment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ messageId, content }: { messageId: number; content: string }) =>
+      apiRequest<ChannelComment>(`/api/messages/${messageId}/comments`, {
+        method: 'POST',
+        body: { content },
+      }),
+    onSuccess: (_, v) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/messages', v.messageId, 'comments'] });
+    },
+  });
+}
+
+export function useDeleteComment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ messageId, commentId }: { messageId: number; commentId: number }) =>
+      apiRequest(`/api/messages/${messageId}/comments/${commentId}`, { method: 'DELETE' }),
+    onSuccess: (_, v) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/messages', v.messageId, 'comments'] });
+    },
+  });
+}
+
+export function useEditComment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ messageId, commentId, content }: { messageId: number; commentId: number; content: string }) =>
+      apiRequest(`/api/messages/${messageId}/comments/${commentId}`, {
+        method: 'PUT',
+        body: { content },
+      }),
+    onSuccess: (_, v) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/messages', v.messageId, 'comments'] });
     },
   });
 }

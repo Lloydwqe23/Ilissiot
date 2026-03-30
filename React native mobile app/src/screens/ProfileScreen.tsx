@@ -152,7 +152,7 @@ export function ProfileScreen({ navigation }: Props) {
 
   const handlePickAvatar = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       legacy: true,
       aspect: [1, 1],

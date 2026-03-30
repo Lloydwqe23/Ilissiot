@@ -88,9 +88,21 @@ export interface Message {
   reactions?: Reaction[];
 }
 
+export interface ChannelComment {
+  id: number;
+  messageId: number;
+  senderId: string;
+  content?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  sender: User;
+}
+
 export interface Chat {
   id: number;
   isGroup?: boolean | null;
+  isChannel?: boolean | null;
+  commentsEnabled?: boolean | null;
   name?: string | null;
   avatarUrl?: string | null;
   creatorId?: string | null;

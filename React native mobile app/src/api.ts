@@ -31,9 +31,129 @@ type RequestOptions = {
   headers?: Record<string, string>;
   isFormData?: boolean;
   timeoutMs?: number;
+  onUploadProgress?: (progress: number) => void;
 };
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
+const DEFAULT_UPLOAD_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
+
+type UploadRequestOptions = {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body: any;
+  timeoutMs: number;
+  onUploadProgress: (progress: number) => void;
+};
+
+function apiUploadRequest<T>(options: UploadRequestOptions): Promise<T> {
+  const { url, method, headers, body, timeoutMs, onUploadProgress } = options;
+
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    let settled = false;
+
+    const finishResolve = (value: T) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+
+    const finishReject = (error: ApiError) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+
+    const timeoutId = setTimeout(() => {
+      try {
+        xhr.abort();
+      } catch {
+        // no-op
+      }
+      finishReject(new ApiError('Request timeout', 0));
+    }, timeoutMs);
+
+    xhr.open(method, url, true);
+    xhr.withCredentials = true;
+
+    Object.entries(headers).forEach(([key, value]) => {
+      try {
+        xhr.setRequestHeader(key, value);
+      } catch {
+        // Ignore unsupported header errors.
+      }
+    });
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable || event.total <= 0) return;
+      const next = Math.max(0, Math.min(1, event.loaded / event.total));
+      onUploadProgress(next);
+    };
+
+    xhr.onerror = () => {
+      clearTimeout(timeoutId);
+      finishReject(new ApiError('Network error', 0));
+    };
+
+    xhr.onabort = () => {
+      clearTimeout(timeoutId);
+      finishReject(new ApiError('Request timeout', 0));
+    };
+
+    xhr.onreadystatechange = () => {
+      if (xhr.readyState !== 4 || settled) return;
+
+      clearTimeout(timeoutId);
+
+      const setCookie = xhr.getResponseHeader('set-cookie');
+      if (setCookie) {
+        const match = setCookie.match(/connect\.sid=[^;]+/);
+        if (match) {
+          void saveSessionCookie(match[0]);
+        }
+      }
+
+      const status = xhr.status || 0;
+      const responseText = xhr.responseText || '';
+
+      if (status < 200 || status >= 300) {
+        let errorData: any = {};
+        if (responseText) {
+          try {
+            errorData = JSON.parse(responseText);
+          } catch {
+            errorData = {};
+          }
+        }
+        finishReject(
+          new ApiError(
+            errorData.message || `Request failed: ${status}`,
+            status,
+            errorData
+          )
+        );
+        return;
+      }
+
+      onUploadProgress(1);
+
+      if (!responseText) {
+        finishResolve(undefined as T);
+        return;
+      }
+
+      try {
+        finishResolve(JSON.parse(responseText));
+      } catch {
+        finishResolve(responseText as unknown as T);
+      }
+    };
+
+    onUploadProgress(0);
+    xhr.send(body);
+  });
+}
 
 export async function apiRequest<T = any>(
   path: string,
@@ -44,8 +164,11 @@ export async function apiRequest<T = any>(
     body,
     headers = {},
     isFormData = false,
-    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+    timeoutMs,
+    onUploadProgress,
   } = options;
+
+  const requestTimeoutMs = timeoutMs ?? (isFormData ? DEFAULT_UPLOAD_REQUEST_TIMEOUT_MS : DEFAULT_REQUEST_TIMEOUT_MS);
 
   const requestHeaders: Record<string, string> = {
     ...headers,
@@ -69,7 +192,7 @@ export async function apiRequest<T = any>(
   const timeoutId = controller
     ? setTimeout(() => {
         controller.abort();
-      }, timeoutMs)
+      }, requestTimeoutMs)
     : null;
 
   if (controller) {
@@ -78,6 +201,17 @@ export async function apiRequest<T = any>(
 
   if (body) {
     config.body = isFormData ? body : JSON.stringify(body);
+  }
+
+  if (isFormData && onUploadProgress && typeof XMLHttpRequest !== 'undefined') {
+    return apiUploadRequest<T>({
+      url: `${API_BASE_URL}${path}`,
+      method,
+      headers: requestHeaders,
+      body,
+      timeoutMs: requestTimeoutMs,
+      onUploadProgress,
+    });
   }
 
   let response: Response;

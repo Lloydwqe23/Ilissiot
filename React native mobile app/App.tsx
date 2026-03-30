@@ -13,6 +13,7 @@ import { AuthScreen } from './src/screens/AuthScreen';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { getThemeColors } from './src/theme';
 import { WS_EVENTS } from './src/types';
+import { initializeNotifications, registerDevicePushToken } from './src/lib/notifications';
 
 function isDarkColor(color: string): boolean {
   const clean = color.replace('#', '');
@@ -33,6 +34,7 @@ function isDarkColor(color: string): boolean {
 function AppContent() {
   const { user, isLoading, isAuthenticated } = useAuth();
   const colors = getThemeColors(user?.theme, user?.colorTheme);
+  const [activeChatId, setActiveChatId] = useState<number | null>(null);
   const useLightStatusIcons = isDarkColor(colors.headerBackground);
   const useLightNavButtons = isDarkColor(colors.background);
 
@@ -50,7 +52,7 @@ function AppContent() {
   // Initialize WebSocket connection when authenticated
   const { send } = useWebSocket({
     userId: user?.id,
-    activeChatId: null,
+    activeChatId,
     onCallOffer: (payload) => {
       // Expo Go builds do not include WebRTC native modules; keep UX clean and notify caller.
       try {
@@ -74,6 +76,20 @@ function AppContent() {
     },
   });
 
+  useEffect(() => {
+    if (!isAuthenticated || !user?.id) {
+      setActiveChatId(null);
+      return;
+    }
+
+    void (async () => {
+      const isReady = await initializeNotifications();
+      if (isReady) {
+        await registerDevicePushToken(user.id);
+      }
+    })();
+  }, [isAuthenticated, user?.id]);
+
   if (isLoading) {
     return (
       <SafeAreaView edges={['bottom']} style={[styles.loading, { backgroundColor: colors.background }]}>
@@ -89,7 +105,7 @@ function AppContent() {
         backgroundColor={colors.headerBackground}
         translucent={false}
       />
-      {isAuthenticated ? <AppNavigator /> : <AuthScreen />}
+      {isAuthenticated ? <AppNavigator onActiveChatChange={setActiveChatId} /> : <AuthScreen />}
     </SafeAreaView>
   );
 }

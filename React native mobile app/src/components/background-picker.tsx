@@ -42,7 +42,7 @@ export function BackgroundPickerModal({
   const handleUploadImage = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
@@ -64,6 +64,7 @@ export function BackgroundPickerModal({
       const response = await apiRequest('/api/upload', {
         method: 'POST',
         body: formData,
+        isFormData: true,
       });
 
       if (response && typeof response === 'object' && 'url' in response) {
@@ -177,7 +178,7 @@ export function BackgroundPickerModal({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
       <Pressable
         style={[styles.overlay, { backgroundColor: colors.overlay }]}
         onPress={onClose}

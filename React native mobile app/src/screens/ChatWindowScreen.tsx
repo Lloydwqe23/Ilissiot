@@ -20,22 +20,39 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
-import { runOnJS } from 'react-native-reanimated';
+import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { setStringAsync } from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { Audio, Video, ResizeMode } from 'expo-av';
 import * as FileSystemLegacy from 'expo-file-system/legacy';
 import { useAuth } from '../hooks/useAuth';
-import { useChat, useVotePoll, usePinMessage, useUnpinMessage, usePinnedMessages } from '../hooks/useChats';
+import {
+  useChat,
+  useVotePoll,
+  usePinMessage,
+  useUnpinMessage,
+  usePinnedMessages,
+  useBlockStatus,
+  useBlockUser,
+  useUnblockUser,
+  useDeleteChat,
+  useComments,
+  useAddComment,
+  useDeleteComment,
+  useEditComment,
+  useChannelCommentsSetting,
+} from '../hooks/useChats';
 import { useMessages, useSendMessage, useMarkMessagesRead, useEditMessage, useDeleteMessages, useAddReaction, useRemoveReaction, useClearChat } from '../hooks/useMessages';
 import { useTyping, useSendTyping } from '../hooks/useTyping';
 import { useUserStatus } from '@/hooks/useUserStatus';
 import { getThemeColors } from '../theme';
 import { BackgroundPickerModal } from '../components/background-picker';
 import { getChatBackground, setChatBackground, findBackground, getCustomBackgroundUrl, setCustomBackgroundUrl, removeCustomBackground } from '../lib/chat-backgrounds';
+import { formatMuteValueLabel, muteFor, setChatMute, useChatMute } from '../lib/chat-mute';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { apiRequest, getFullUrl } from '../api';
+import { API_BASE_URL, ApiError, apiRequest, getFullUrl, getSessionCookie } from '../api';
+import { UPLOAD_MAX_SIZE } from '../config';
 import {
   getChatName,
   getChatAvatar,
@@ -44,8 +61,10 @@ import {
   getInitials,
   formatFullTime,
   formatMessageTime,
+  getMessagePreviewText,
 } from '../utils/helpers';
-import type { Message, Attachment, Chat } from '../types';
+import type { Message, Attachment, ChannelComment } from '../types';
+import type { MuteValue } from '../lib/chat-mute';
 
 const EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🔥', '👏', '🎉'];
 const STICKERS = [
@@ -56,6 +75,50 @@ const STICKERS = [
 const AUDIO_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 const AUDIO_WAVE_BARS = [3, 5, 8, 4, 9, 6, 10, 7, 5, 8, 4, 6, 9, 3, 7, 10, 5, 8, 4, 6, 9, 7, 5, 3, 8, 6, 10, 4, 7, 5, 9, 6];
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+const FILE_EXT_TO_MIME: Record<string, string> = {
+  pdf: 'application/pdf',
+  epub: 'application/epub+zip',
+  txt: 'text/plain',
+  csv: 'text/csv',
+  json: 'application/json',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  zip: 'application/zip',
+  rar: 'application/vnd.rar',
+  '7z': 'application/x-7z-compressed',
+  mp3: 'audio/mpeg',
+  m4a: 'audio/m4a',
+  wav: 'audio/wav',
+  ogg: 'audio/ogg',
+  mp4: 'video/mp4',
+  mov: 'video/quicktime',
+  webm: 'video/webm',
+};
+
+function normalizeUploadFileName(rawName: string | undefined): string {
+  const fallback = `file-${Date.now()}`;
+  const base = (rawName || fallback).replace(/\\/g, '/').split('/').pop() || fallback;
+  try {
+    return decodeURIComponent(base);
+  } catch {
+    return base;
+  }
+}
+
+function resolveUploadMimeType(fileName: string, providedMimeType?: string | null): string {
+  const lowerProvided = (providedMimeType || '').toLowerCase();
+  if (lowerProvided && lowerProvided !== 'application/octet-stream' && lowerProvided !== 'binary/octet-stream') {
+    return lowerProvided;
+  }
+
+  const ext = (fileName.split('.').pop() || '').toLowerCase();
+  return FILE_EXT_TO_MIME[ext] || 'application/octet-stream';
+}
 
 type Props = {
   navigation: any;
@@ -90,10 +153,16 @@ export function ChatWindowScreen({ navigation, route }: Props) {
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentSearchIndex, setCurrentSearchIndex] = useState(0);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [commentsMessage, setCommentsMessage] = useState<Message | null>(null);
+  const [commentInput, setCommentInput] = useState('');
+  const [editingCommentId, setEditingCommentId] = useState<number | null>(null);
+  const [commentCounts, setCommentCounts] = useState<Record<number, number>>({});
   // Use useMessages hook for chat messages
   const { data: messages, isLoading: messagesLoading } = useMessages(chatId);
   const { data: pinnedMessages } = usePinnedMessages(chatId);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [selectedImages, setSelectedImages] = useState<Attachment[]>([]);
   const [showImagePicker, setShowImagePicker] = useState(false);
   const [imagePickerIndex, setImagePickerIndex] = useState(0);
@@ -127,30 +196,73 @@ export function ChatWindowScreen({ navigation, route }: Props) {
   const votePoll = useVotePoll();
   const pinMessage = usePinMessage();
   const unpinMessage = useUnpinMessage();
+  const channelCommentsSetting = useChannelCommentsSetting();
+  const addComment = useAddComment();
+  const deleteComment = useDeleteComment();
+  const editComment = useEditComment();
+  const { data: comments = [], isLoading: commentsLoading } = useComments(commentsMessage?.id || null);
   const clearChat = useClearChat();
+  const deleteChat = useDeleteChat();
+  const { data: blockStatus } = useBlockStatus(otherUser?.id || null);
+  const blockUser = useBlockUser();
+  const unblockUser = useUnblockUser();
+  const isBlockedByMe = !!blockStatus?.blocked;
+  const isBlockedByOther = !!blockStatus?.blockedBy;
+  const isMessagingBlocked = !chat?.isGroup && (isBlockedByMe || isBlockedByOther);
+  const commentsAllowed = !!chat?.isChannel && chat.commentsEnabled !== false;
+  const chatMuteValue = useChatMute(chatId, user?.id);
+  const chatMuted = chatMuteValue !== null;
+  const chatMuteLabel = formatMuteValueLabel(chatMuteValue);
+  const currentMember = chat?.members.find((member) => member.userId === user?.id);
+  const isChannelAdmin =
+    !!chat?.isChannel &&
+    (chat.creatorId === user?.id || currentMember?.role === 'admin');
+  const isCommentMutating = addComment.isPending || editComment.isPending || deleteComment.isPending;
 
   const pinnedMessageIds = useMemo(() => {
     return new Set<number>((pinnedMessages || []).map((p) => p.messageId));
   }, [pinnedMessages]);
 
   const latestPinned = pinnedMessages?.[0]?.message;
+  const swipeOffsetX = useSharedValue(0);
 
-  // Swipe gesture to go back - memoized to prevent re-creation on every render
-  const swipeGesture = useCallback(() => {
-    return Gesture.Pan()
-      .maxPointers(1)
-      // Activate only on a deliberate horizontal swipe so vertical list scrolling keeps working.
-      .activeOffsetX(80)
-      .failOffsetY([-18, 18])
-      .onEnd((event) => {
-        // Only trigger on right swipe with sufficient velocity
-        if (event.translationX > 80 && event.velocityX > 500) {
-          runOnJS(navigation.goBack)();
-        }
-      });
-  }, [navigation]);
+  const swipe = useMemo(
+    () =>
+      Gesture.Pan()
+        .maxPointers(1)
+        .hitSlop({ left: 0, width: 28 })
+        .activeOffsetX(8)
+        .failOffsetY([-14, 14])
+        .onUpdate((event) => {
+          swipeOffsetX.value = Math.max(0, Math.min(event.translationX, SCREEN_WIDTH));
+        })
+        .onEnd((event) => {
+          const shouldGoBack = event.translationX > SCREEN_WIDTH * 0.26 || event.velocityX > 900;
+          if (shouldGoBack) {
+            swipeOffsetX.value = withTiming(SCREEN_WIDTH, { duration: 120 }, (finished) => {
+              if (finished) {
+                runOnJS(navigation.goBack)();
+              }
+            });
+            return;
+          }
 
-  const swipe = swipeGesture();
+          swipeOffsetX.value = withTiming(0, { duration: 140 });
+        }),
+    [navigation, swipeOffsetX],
+  );
+
+  const swipeAnimatedStyle = useAnimatedStyle(() => {
+    const p = Math.min(1, swipeOffsetX.value / 30);
+    return {
+      transform: [{ translateX: swipeOffsetX.value }],
+      shadowColor: '#000',
+      shadowOpacity: 0.32 * p,
+      shadowRadius: 18 * p,
+      shadowOffset: { width: -8, height: 0 },
+      elevation: p > 0.01 ? 16 : 0,
+    };
+  });
 
   const searchMatches = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -229,6 +341,44 @@ export function ChatWindowScreen({ navigation, route }: Props) {
     }
   }, [votePoll.isSuccess]);
 
+  useEffect(() => {
+    if (!commentsAllowed || !messages?.length) {
+      setCommentCounts({});
+      return;
+    }
+
+    let active = true;
+    const loadCommentCounts = async () => {
+      const pairs = await Promise.all(
+        messages.map(async (message) => {
+          try {
+            const data = await apiRequest<ChannelComment[]>(`/api/messages/${message.id}/comments`);
+            return [message.id, Array.isArray(data) ? data.length : 0] as const;
+          } catch {
+            return [message.id, 0] as const;
+          }
+        }),
+      );
+
+      if (active) {
+        setCommentCounts(Object.fromEntries(pairs));
+      }
+    };
+
+    loadCommentCounts();
+    return () => {
+      active = false;
+    };
+  }, [commentsAllowed, messages]);
+
+  useEffect(() => {
+    if (!commentsMessage) return;
+    setCommentCounts((prev) => ({
+      ...prev,
+      [commentsMessage.id]: comments.length,
+    }));
+  }, [comments.length, commentsMessage]);
+
   // Load chat background on mount or chat change
   useEffect(() => {
     (async () => {
@@ -270,6 +420,13 @@ export function ChatWindowScreen({ navigation, route }: Props) {
   const handleSend = () => {
     const text = messageText.trim();
     if (!text && !editingMessage) return;
+    if (isMessagingBlocked) {
+      Alert.alert(
+        'Messaging unavailable',
+        isBlockedByOther ? 'This user has blocked you.' : 'Unblock this user to send messages.',
+      );
+      return;
+    }
 
     if (editingMessage) {
       editMessage.mutate({
@@ -279,7 +436,15 @@ export function ChatWindowScreen({ navigation, route }: Props) {
       });
       setEditingMessage(null);
     } else {
-      sendMessage.mutate({ chatId, content: text });
+      sendMessage.mutate(
+        { chatId, content: text },
+        {
+          onError: (error) => {
+            const message = error instanceof Error ? error.message : 'Could not send the message.';
+            Alert.alert('Send failed', message);
+          },
+        },
+      );
     }
 
     setMessageText('');
@@ -303,6 +468,7 @@ export function ChatWindowScreen({ navigation, route }: Props) {
       if (!asset?.uri) return;
 
       setUploading(true);
+      setUploadProgress(0);
       try {
         const uri = asset.uri;
         const filename = uri.split('/').pop() || `image-${Date.now()}`;
@@ -320,6 +486,7 @@ export function ChatWindowScreen({ navigation, route }: Props) {
           method: 'POST',
           body: formData,
           isFormData: true,
+          onUploadProgress: setUploadProgress,
         });
 
         const newImage = { name: filename, url: response.url, type };
@@ -330,6 +497,7 @@ export function ChatWindowScreen({ navigation, route }: Props) {
         Alert.alert('Upload Failed', 'Could not upload the image. Please try again.');
       } finally {
         setUploading(false);
+        setUploadProgress(0);
       }
     } catch {
       Alert.alert('Attachment failed', 'Could not pick an image. Please try again.');
@@ -421,7 +589,7 @@ export function ChatWindowScreen({ navigation, route }: Props) {
       }
 
       const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        mediaTypes: ['videos'],
         quality: 0.8,
         videoMaxDuration: 120,
       });
@@ -612,7 +780,15 @@ export function ChatWindowScreen({ navigation, route }: Props) {
       const asset = result.assets?.[0];
       if (!asset?.uri) return;
 
-      await uploadFile(asset.uri, asset.name || `document-${Date.now()}`, asset.mimeType || 'application/octet-stream');
+      if (typeof asset.size === 'number' && asset.size > UPLOAD_MAX_SIZE) {
+        Alert.alert('File too large', 'Maximum file size is 50MB.');
+        return;
+      }
+
+      const normalizedName = normalizeUploadFileName(asset.name || `document-${Date.now()}`);
+      const normalizedType = resolveUploadMimeType(normalizedName, asset.mimeType);
+
+      await uploadFile(asset.uri, normalizedName, normalizedType);
     } catch {
       Alert.alert('Attachment failed', 'Could not pick a document. Please try again.');
     }
@@ -620,11 +796,26 @@ export function ChatWindowScreen({ navigation, route }: Props) {
 
   const confirmImageSelection = () => {
     if (selectedImages.length === 0) return;
-    sendMessage.mutate({
-      chatId,
-      content: messageText.trim() || undefined,
-      attachments: selectedImages,
-    });
+    if (isMessagingBlocked) {
+      Alert.alert(
+        'Messaging unavailable',
+        isBlockedByOther ? 'This user has blocked you.' : 'Unblock this user to send attachments.',
+      );
+      return;
+    }
+    sendMessage.mutate(
+      {
+        chatId,
+        content: messageText.trim() || undefined,
+        attachments: selectedImages,
+      },
+      {
+        onError: (error) => {
+          const message = error instanceof Error ? error.message : 'Could not send selected images.';
+          Alert.alert('Send failed', message);
+        },
+      },
+    );
     setMessageText('');
     setSelectedImages([]);
     setShowImagePicker(false);
@@ -633,6 +824,7 @@ export function ChatWindowScreen({ navigation, route }: Props) {
 
   const uploadFile = async (uri: string, name: string, type: string) => {
     setUploading(true);
+    setUploadProgress(0);
     try {
       let uploadUri = uri;
       // Some Android camera/video providers return content:// URIs that are not reliably streamable via FormData.
@@ -643,34 +835,95 @@ export function ChatWindowScreen({ navigation, route }: Props) {
         uploadUri = dest;
       }
 
-      const formData = new FormData();
-      formData.append('file', {
-        uri: uploadUri,
-        name,
-        type,
-      } as any);
+      const fileInfo = await FileSystemLegacy.getInfoAsync(uploadUri);
+      if (!fileInfo.exists || fileInfo.isDirectory) {
+        throw new ApiError('Selected file is not readable', 0);
+      }
 
-      const response = await apiRequest<{ url: string; name?: string; type?: string }>('/api/upload', {
-        method: 'POST',
-        body: formData,
-        isFormData: true,
-      });
+      const uploadOptions: FileSystemLegacy.FileSystemUploadOptions = {
+        uploadType: FileSystemLegacy.FileSystemUploadType.MULTIPART,
+        fieldName: 'file',
+        mimeType: type,
+        httpMethod: 'POST',
+      };
+
+      const sessionCookie = getSessionCookie();
+      if (sessionCookie) {
+        uploadOptions.headers = { Cookie: sessionCookie };
+      }
+
+      const task = FileSystemLegacy.createUploadTask(
+        `${API_BASE_URL}/api/upload`,
+        uploadUri,
+        uploadOptions,
+        (progress) => {
+          const total = progress.totalBytesExpectedToSend;
+          if (!total || total <= 0) return;
+          const ratio = Math.max(0, Math.min(1, progress.totalBytesSent / total));
+          setUploadProgress(ratio);
+        }
+      );
+
+      const uploadResult = await task.uploadAsync();
+      if (!uploadResult) {
+        throw new ApiError('Upload cancelled', 0);
+      }
+
+      if (uploadResult.status < 200 || uploadResult.status >= 300) {
+        let errorData: any = {};
+        if (uploadResult.body) {
+          try {
+            errorData = JSON.parse(uploadResult.body);
+          } catch {
+            errorData = {};
+          }
+        }
+        throw new ApiError(errorData.message || `Request failed: ${uploadResult.status}`, uploadResult.status, errorData);
+      }
+
+      const response = JSON.parse(uploadResult.body || '{}') as { url: string; name?: string; type?: string };
 
       const attachment: Attachment = {
-        name: response?.name || name,
+        name,
         url: response.url,
         type: response?.type || type,
       };
-      sendMessage.mutate({
-        chatId,
-        content: messageText.trim() || undefined,
-        attachments: [attachment],
-      });
+      if (isMessagingBlocked) {
+        Alert.alert(
+          'Messaging unavailable',
+          isBlockedByOther ? 'This user has blocked you.' : 'Unblock this user to send attachments.',
+        );
+        return;
+      }
+      sendMessage.mutate(
+        {
+          chatId,
+          content: messageText.trim() || undefined,
+          attachments: [attachment],
+        },
+        {
+          onError: (error) => {
+            const message = error instanceof Error ? error.message : 'Could not send uploaded file.';
+            Alert.alert('Send failed', message);
+          },
+        },
+      );
       setMessageText('');
     } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 413) {
+          Alert.alert('File too large', 'Maximum file size is 50MB.');
+          return;
+        }
+        if (err.status === 0 && /timeout/i.test(err.message)) {
+          Alert.alert('Upload timed out', 'Upload took too long. Please try again on a faster connection.');
+          return;
+        }
+      }
       Alert.alert('Upload Failed', 'Could not upload the file. Please try again.');
     } finally {
       setUploading(false);
+      setUploadProgress(0);
     }
   };
 
@@ -709,8 +962,62 @@ export function ChatWindowScreen({ navigation, route }: Props) {
     setSelectedMessage(null);
   };
 
+  const handleOpenComments = (message: Message) => {
+    setCommentsMessage(message);
+    setCommentInput('');
+    setEditingCommentId(null);
+    setCommentsOpen(true);
+  };
+
+  const handleSendComment = () => {
+    if (!commentsMessage || !commentsAllowed) return;
+    const content = commentInput.trim();
+    if (!content) return;
+
+    if (editingCommentId) {
+      editComment.mutate(
+        {
+          messageId: commentsMessage.id,
+          commentId: editingCommentId,
+          content,
+        },
+        {
+          onSuccess: () => {
+            setCommentInput('');
+            setEditingCommentId(null);
+          },
+        },
+      );
+      return;
+    }
+
+    addComment.mutate(
+      {
+        messageId: commentsMessage.id,
+        content,
+      },
+      {
+        onSuccess: () => {
+          setCommentInput('');
+        },
+      },
+    );
+  };
+
+  const handleDeleteCommentById = (commentId: number) => {
+    if (!commentsMessage) return;
+    deleteComment.mutate({
+      messageId: commentsMessage.id,
+      commentId,
+    });
+  };
+
   const openHeaderMenu = () => {
     setShowHeaderMenu(true);
+  };
+
+  const handleSetChatMute = (value: MuteValue) => {
+    void setChatMute(chatId, value, user?.id);
   };
 
   const handleToggleSearch = () => {
@@ -734,6 +1041,71 @@ export function ChatWindowScreen({ navigation, route }: Props) {
     ]);
   };
 
+  const handleClearHistoryForAll = () => {
+    if (chat?.isGroup) return;
+    Alert.alert(
+      'Clear for all',
+      'Remove the conversation from your view and delete your own messages for the other user?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: () => clearChat.mutate({ chatId, forAll: true }),
+        },
+      ],
+    );
+  };
+
+  const handleToggleBlockUser = () => {
+    if (!otherUser) return;
+
+    if (isBlockedByMe) {
+      unblockUser.mutate(otherUser.id, {
+        onError: (error) => {
+          const message = error instanceof Error ? error.message : 'Could not unblock user.';
+          Alert.alert('Unblock failed', message);
+        },
+      });
+      return;
+    }
+
+    Alert.alert('Block user', `Block ${getDisplayName(otherUser)}?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Block',
+        style: 'destructive',
+        onPress: () => {
+          blockUser.mutate(otherUser.id, {
+            onError: (error) => {
+              const message = error instanceof Error ? error.message : 'Could not block user.';
+              Alert.alert('Block failed', message);
+            },
+          });
+        },
+      },
+    ]);
+  };
+
+  const handleDeleteCurrentChat = () => {
+    Alert.alert('Delete chat', 'Delete this chat? This action cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteChat.mutateAsync(chatId);
+            navigation.goBack();
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Could not delete chat.';
+            Alert.alert('Delete failed', message);
+          }
+        },
+      },
+    ]);
+  };
+
   const headerMenuActions: Array<{
     key: string;
     label: string;
@@ -753,6 +1125,41 @@ export function ChatWindowScreen({ navigation, route }: Props) {
       icon: 'pin-outline',
       onPress: () => navigation.navigate('PinnedMessages', { chatId }),
     },
+    ...(chatMuted
+      ? [
+          {
+            key: 'unmute',
+            label: 'Unmute Notifications',
+            icon: 'notifications-outline' as keyof typeof Ionicons.glyphMap,
+            onPress: () => handleSetChatMute(null),
+          },
+        ]
+      : [
+          {
+            key: 'mute-1h',
+            label: 'Mute Notifications for 1 Hour',
+            icon: 'notifications-off-outline' as keyof typeof Ionicons.glyphMap,
+            onPress: () => handleSetChatMute(muteFor(1)),
+          },
+          {
+            key: 'mute-8h',
+            label: 'Mute Notifications for 8 Hours',
+            icon: 'notifications-off-outline' as keyof typeof Ionicons.glyphMap,
+            onPress: () => handleSetChatMute(muteFor(8)),
+          },
+          {
+            key: 'mute-24h',
+            label: 'Mute Notifications for 24 Hours',
+            icon: 'notifications-off-outline' as keyof typeof Ionicons.glyphMap,
+            onPress: () => handleSetChatMute(muteFor(24)),
+          },
+          {
+            key: 'mute-forever',
+            label: 'Mute Notifications Forever',
+            icon: 'notifications-off' as keyof typeof Ionicons.glyphMap,
+            onPress: () => handleSetChatMute('forever'),
+          },
+        ]),
     ...(chat?.isGroup
       ? [
           {
@@ -768,6 +1175,25 @@ export function ChatWindowScreen({ navigation, route }: Props) {
             onPress: () => navigation.navigate('GroupInfo', { chatId }),
           },
         ]
+      : chat?.isChannel
+        ? [
+            ...(isChannelAdmin
+              ? [
+                  {
+                    key: 'channel-comments',
+                    label: chat.commentsEnabled === false ? 'Enable Comments' : 'Disable Comments',
+                    icon: (chat.commentsEnabled === false
+                      ? 'chatbubble-ellipses-outline'
+                      : 'chatbubble-outline') as keyof typeof Ionicons.glyphMap,
+                    onPress: () =>
+                      channelCommentsSetting.mutate({
+                        chatId,
+                        enabled: chat.commentsEnabled === false,
+                      }),
+                  },
+                ]
+              : []),
+          ]
       : otherUser
         ? [
             {
@@ -775,6 +1201,22 @@ export function ChatWindowScreen({ navigation, route }: Props) {
               label: 'View Profile',
               icon: 'person-outline' as keyof typeof Ionicons.glyphMap,
               onPress: () => navigation.navigate('UserProfile', { userId: otherUser.id, chatId }),
+            },
+            {
+              key: 'block',
+              label: isBlockedByMe ? 'Unblock User' : 'Block User',
+              icon: isBlockedByMe
+                ? ('checkmark-circle-outline' as keyof typeof Ionicons.glyphMap)
+                : ('ban-outline' as keyof typeof Ionicons.glyphMap),
+              destructive: !isBlockedByMe,
+              onPress: handleToggleBlockUser,
+            },
+            {
+              key: 'clear-all',
+              label: 'Clear History for All',
+              icon: 'trash-bin-outline' as keyof typeof Ionicons.glyphMap,
+              destructive: true,
+              onPress: handleClearHistoryForAll,
             },
           ]
         : []),
@@ -790,6 +1232,13 @@ export function ChatWindowScreen({ navigation, route }: Props) {
       icon: 'trash-outline',
       destructive: true,
       onPress: handleClearHistory,
+    },
+    {
+      key: 'delete-chat',
+      label: 'Delete Chat',
+      icon: 'trash',
+      destructive: true,
+      onPress: handleDeleteCurrentChat,
     },
   ];
 
@@ -822,6 +1271,17 @@ export function ChatWindowScreen({ navigation, route }: Props) {
         ]
       : []),
   ];
+
+  const headerStatusText = typingText || (chat?.isGroup
+    ? `${chat.members.length} members`
+    : chat?.isChannel
+      ? `${chat.members.length} subscribers`
+      : statusText);
+
+  const headerStatusWithMute =
+    chatMuted && !typingText
+      ? `${headerStatusText} - ${chatMuteLabel || 'Muted'}`
+      : headerStatusText;
 
   const renderAttachment = (attachment: Attachment, isMine: boolean) => {
     const url = getFullUrl(attachment.url);
@@ -1277,6 +1737,33 @@ export function ChatWindowScreen({ navigation, route }: Props) {
 
               {/* Reactions */}
               {renderReactions(message)}
+
+              {commentsAllowed && (
+                <TouchableOpacity
+                  style={[
+                    styles.commentOpenButton,
+                    {
+                      backgroundColor: isMine ? 'rgba(255,255,255,0.14)' : colors.surfaceVariant,
+                      borderColor: isMine ? 'rgba(255,255,255,0.22)' : colors.border,
+                    },
+                  ]}
+                  onPress={() => handleOpenComments(message)}
+                >
+                  <Ionicons
+                    name="chatbubble-ellipses-outline"
+                    size={14}
+                    color={isMine ? 'rgba(255,255,255,0.85)' : colors.textMuted}
+                  />
+                  <Text
+                    style={[
+                      styles.commentOpenText,
+                      { color: isMine ? 'rgba(255,255,255,0.85)' : colors.textMuted },
+                    ]}
+                  >
+                    Comments ({commentCounts[message.id] ?? 0})
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
           </TouchableOpacity>
         )}
@@ -1286,7 +1773,7 @@ export function ChatWindowScreen({ navigation, route }: Props) {
 
   return (
     <GestureDetector gesture={swipe}>
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <Animated.View style={[styles.container, { backgroundColor: colors.background }, swipeAnimatedStyle]}>
         {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.headerBackground, borderBottomColor: colors.border, paddingTop: Math.max(insets.top, 8) }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
@@ -1306,6 +1793,10 @@ export function ChatWindowScreen({ navigation, route }: Props) {
           <View style={[styles.headerAvatarContainer, { backgroundColor: colors.primary }]}>
             {chatAvatar ? (
               <Image source={{ uri: chatAvatar }} style={styles.headerAvatar} />
+            ) : chat?.isChannel ? (
+              <View style={[styles.groupHeaderAvatarFallback, { backgroundColor: colors.primary }]}>
+                <Ionicons name="megaphone" size={18} color="#fff" />
+              </View>
             ) : chat?.isGroup ? (
               <View style={[styles.groupHeaderAvatarFallback, { backgroundColor: colors.primary }]}>
                 <Ionicons name="people" size={18} color="#fff" />
@@ -1319,9 +1810,7 @@ export function ChatWindowScreen({ navigation, route }: Props) {
               {chatName}
             </Text>
             <Text style={[styles.headerStatus, { color: colors.textMuted }]} numberOfLines={1}>
-              {typingText || (chat?.isGroup
-                ? `${chat.members.length} members`
-                : statusText)}
+              {headerStatusWithMute}
             </Text>
           </View>
         </TouchableOpacity>
@@ -1394,8 +1883,31 @@ export function ChatWindowScreen({ navigation, route }: Props) {
             >
               <Ionicons name="chevron-down" size={18} color={colors.primary} />
             </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.searchCloseButton}
+              onPress={() => {
+                setSearchVisible(false);
+                setSearchQuery('');
+                setCurrentSearchIndex(0);
+              }}
+            >
+              <Ionicons name="close" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
           </View>
         )}
+
+        {latestPinned ? (
+          <TouchableOpacity
+            style={[styles.pinnedBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}
+            onPress={() => navigation.navigate('PinnedMessages', { chatId })}
+          >
+            <Ionicons name="pin" size={15} color={colors.primary} />
+            <Text style={[styles.pinnedBarText, { color: colors.text }]} numberOfLines={1}>
+              Pinned: {latestPinned.poll ? `📊 Poll: ${latestPinned.poll.question}` : getMessagePreviewText(latestPinned)}
+            </Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+          </TouchableOpacity>
+        ) : null}
 
         {messagesLoading ? (
           <View style={styles.loadingContainer}>
@@ -1438,23 +1950,30 @@ export function ChatWindowScreen({ navigation, route }: Props) {
           />
         )}
 
-        {latestPinned ? (
-          <TouchableOpacity
-            style={[styles.pinnedBar, { backgroundColor: colors.surface, borderTopColor: colors.border }]}
-            onPress={() => navigation.navigate('PinnedMessages', { chatId })}
-          >
-            <Ionicons name="pin" size={15} color={colors.primary} />
-            <Text style={[styles.pinnedBarText, { color: colors.text }]} numberOfLines={1}>
-              Pinned: {latestPinned.content || (latestPinned.poll ? latestPinned.poll.question : 'Attachment')}
-            </Text>
-            <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
-          </TouchableOpacity>
-        ) : null}
-
         {/* Typing indicator */}
         {typingText ? (
           <View style={[styles.typingIndicator, { backgroundColor: colors.surface }]}>
             <Text style={[styles.typingText, { color: colors.textMuted }]}>{typingText}</Text>
+          </View>
+        ) : null}
+
+        {isMessagingBlocked ? (
+          <View style={[styles.blockNotice, { backgroundColor: colors.surface, borderTopColor: colors.border }]}> 
+            <Ionicons name="ban-outline" size={16} color={colors.destructive} />
+            <Text style={[styles.blockNoticeText, { color: colors.textSecondary }]}>
+              {isBlockedByOther ? 'This user has blocked you.' : 'You blocked this user.'}
+            </Text>
+            {isBlockedByMe ? (
+              <TouchableOpacity
+                style={[styles.blockNoticeAction, { borderColor: colors.primary }]}
+                onPress={handleToggleBlockUser}
+                disabled={unblockUser.isPending}
+              >
+                <Text style={[styles.blockNoticeActionText, { color: colors.primary }]}>
+                  {unblockUser.isPending ? 'Unblocking...' : 'Unblock'}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         ) : null}
 
@@ -1488,30 +2007,52 @@ export function ChatWindowScreen({ navigation, route }: Props) {
             <TextInput
               style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text }]}
               value={messageText}
+              editable={!isMessagingBlocked}
               onChangeText={(value) => {
                 setMessageText(value);
-                if (value.trim()) {
+                if (!isMessagingBlocked && value.trim()) {
                   sendTyping();
                 }
               }}
-              placeholder="Message..."
+              placeholder={
+                isMessagingBlocked
+                  ? isBlockedByOther
+                    ? 'You are blocked'
+                    : 'Unblock user to message'
+                  : 'Message...'
+              }
               placeholderTextColor={colors.textMuted}
               multiline
               maxLength={4000}
             />
 
             {uploading ? (
-              <ActivityIndicator color={colors.primary} style={styles.sendButton} />
+              <View
+                style={[
+                  styles.sendButton,
+                  styles.uploadProgressCircle,
+                  { borderColor: colors.primary, backgroundColor: colors.surfaceVariant },
+                ]}
+              >
+                <Text style={[styles.uploadProgressText, { color: colors.primary }]}>
+                  {`${Math.max(1, Math.min(100, Math.round(uploadProgress * 100)))}%`}
+                </Text>
+              </View>
             ) : (
               <TouchableOpacity
-                style={[styles.sendButton, { backgroundColor: messageText.trim() ? colors.primary : colors.surfaceVariant }]}
+                style={[
+                  styles.sendButton,
+                  {
+                    backgroundColor: !isMessagingBlocked && messageText.trim() ? colors.primary : colors.surfaceVariant,
+                  },
+                ]}
                 onPress={handleSend}
-                disabled={!messageText.trim() && !editingMessage}
+                disabled={isMessagingBlocked || (!messageText.trim() && !editingMessage)}
               >
                 <Ionicons
                   name={editingMessage ? 'checkmark' : 'send'}
                   size={20}
-                  color={messageText.trim() ? '#fff' : colors.textMuted}
+                  color={!isMessagingBlocked && messageText.trim() ? '#fff' : colors.textMuted}
                 />
               </TouchableOpacity>
             )}
@@ -1519,7 +2060,7 @@ export function ChatWindowScreen({ navigation, route }: Props) {
 
           <View pointerEvents="box-none" style={styles.attachmentsRow}>
             {/* Image button */}
-            <TouchableOpacity style={styles.attachButton} onPress={handlePickImage} disabled={uploading}>
+            <TouchableOpacity style={styles.attachButton} onPress={handlePickImage} disabled={uploading || isMessagingBlocked}>
               <Ionicons name="image" size={24} color={colors.primary} />
             </TouchableOpacity>
 
@@ -1527,25 +2068,25 @@ export function ChatWindowScreen({ navigation, route }: Props) {
             <TouchableOpacity
               style={styles.attachButton}
               onPress={() => setShowStickerPicker(true)}
-              disabled={uploading || isRecordingAudio}
+              disabled={uploading || isRecordingAudio || isMessagingBlocked}
             >
               <Ionicons name="happy-outline" size={24} color={colors.primary} />
             </TouchableOpacity>
 
             {/* Record button */}
-            <TouchableOpacity style={styles.attachButton} onPress={handleRecordPress} disabled={uploading}>
+            <TouchableOpacity style={styles.attachButton} onPress={handleRecordPress} disabled={uploading || isMessagingBlocked}>
               <Ionicons name={isRecordingAudio ? 'stop-circle-outline' : 'mic-outline'} size={24} color={isRecordingAudio ? colors.destructive : colors.primary} />
             </TouchableOpacity>
 
             {/* File button */}
-            <TouchableOpacity style={styles.attachButton} onPress={handlePickDocument} disabled={uploading}>
+            <TouchableOpacity style={styles.attachButton} onPress={handlePickDocument} disabled={uploading || isMessagingBlocked}>
               <Ionicons name="document" size={24} color={colors.primary} />
             </TouchableOpacity>
           </View>
         </View>
       </KeyboardAvoidingView>
 
-      <Modal visible={showStickerPicker} transparent animationType="fade" onRequestClose={() => setShowStickerPicker(false)}>
+      <Modal visible={showStickerPicker} transparent animationType="none" onRequestClose={() => setShowStickerPicker(false)}>
         <Pressable
           style={[styles.stickerOverlay, { backgroundColor: colors.overlay }]}
           onPress={() => setShowStickerPicker(false)}
@@ -1572,8 +2113,231 @@ export function ChatWindowScreen({ navigation, route }: Props) {
         </Pressable>
       </Modal>
 
+      <Modal
+        visible={commentsOpen && !!commentsMessage}
+        animationType="slide"
+        onRequestClose={() => setCommentsOpen(false)}
+      >
+        <View style={[styles.commentsScreen, { backgroundColor: colors.background }]}> 
+          <View
+            style={[
+              styles.commentsHeader,
+              {
+                backgroundColor: colors.headerBackground,
+                borderBottomColor: colors.border,
+                paddingTop: Math.max(insets.top, 8),
+              },
+            ]}
+          >
+            <TouchableOpacity onPress={() => setCommentsOpen(false)} style={styles.backButton}>
+              <Ionicons name="arrow-back" size={24} color={colors.primary} />
+            </TouchableOpacity>
+            <View style={styles.commentsHeaderTextWrap}>
+              <Text style={[styles.commentsTitle, { color: colors.text }]}>Comments</Text>
+              <Text style={[styles.commentsSubtitle, { color: colors.textMuted }]} numberOfLines={1}>
+                {commentsMessage?.sender ? `Post by ${getDisplayName(commentsMessage.sender)}` : 'Channel post'}
+              </Text>
+            </View>
+          </View>
+
+          {commentsMessage ? (
+            <View
+              style={[
+                styles.commentsPostPreview,
+                {
+                  backgroundColor: colors.surface,
+                  borderBottomColor: colors.border,
+                },
+              ]}
+            >
+              <Text style={[styles.commentsPostLabel, { color: colors.textMuted }]}>Post</Text>
+              {commentsMessage.content ? (
+                <Text style={[styles.commentsPostText, { color: colors.text }]}>{commentsMessage.content}</Text>
+              ) : null}
+              {commentsMessage.attachments?.length ? (
+                <View style={commentsMessage.content ? { marginTop: 8 } : undefined}>
+                  {commentsMessage.attachments.map((attachment, index) => (
+                    <View key={`${commentsMessage.id}-${index}`}>{renderAttachment(attachment, false)}</View>
+                  ))}
+                </View>
+              ) : null}
+              {!commentsMessage.content && !commentsMessage.attachments?.length ? (
+                <Text style={[styles.commentsPostText, { color: colors.textMuted }]}>Attachment</Text>
+              ) : null}
+            </View>
+          ) : null}
+
+          {commentsLoading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={colors.primary} />
+            </View>
+          ) : (
+            <FlatList
+              data={comments}
+              keyExtractor={(item) => String(item.id)}
+              style={styles.commentsList}
+              contentContainerStyle={[
+                styles.commentsListContent,
+                comments.length === 0 ? styles.commentsEmptyWrap : undefined,
+              ]}
+              ListEmptyComponent={
+                <Text style={[styles.commentsEmptyText, { color: colors.textMuted }]}>No comments yet</Text>
+              }
+              renderItem={({ item }) => {
+                const mine = item.senderId === user?.id;
+                return (
+                  <View style={[styles.commentRow, mine && styles.commentRowMine]}>
+                    <View
+                      style={[
+                        styles.commentBubble,
+                        {
+                          backgroundColor: mine ? colors.messageBubbleSent : colors.card,
+                          borderColor: mine ? 'transparent' : colors.border,
+                        },
+                      ]}
+                    >
+                      {!mine ? (
+                        <Text style={[styles.commentSender, { color: colors.primary }]}>
+                          {getDisplayName(item.sender)}
+                        </Text>
+                      ) : null}
+
+                      <Text
+                        style={[
+                          styles.commentText,
+                          { color: mine ? colors.messageBubbleSentText : colors.text },
+                        ]}
+                      >
+                        {item.content || 'Attachment'}
+                      </Text>
+
+                      <View style={styles.commentMeta}>
+                        <Text
+                          style={[
+                            styles.commentTime,
+                            { color: mine ? 'rgba(255,255,255,0.65)' : colors.textMuted },
+                          ]}
+                        >
+                          {formatFullTime(item.createdAt)}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {(mine || isChannelAdmin) ? (
+                      <View style={styles.commentActions}>
+                        {mine ? (
+                          <TouchableOpacity
+                            onPress={() => {
+                              setEditingCommentId(item.id);
+                              setCommentInput(item.content || '');
+                            }}
+                            style={styles.commentActionButton}
+                          >
+                            <Ionicons name="pencil" size={16} color={colors.primary} />
+                          </TouchableOpacity>
+                        ) : null}
+                        <TouchableOpacity
+                          onPress={() => handleDeleteCommentById(item.id)}
+                          style={styles.commentActionButton}
+                        >
+                          <Ionicons name="trash" size={16} color={colors.destructive} />
+                        </TouchableOpacity>
+                      </View>
+                    ) : null}
+                  </View>
+                );
+              }}
+            />
+          )}
+
+          {commentsAllowed ? (
+            <View
+              style={[
+                styles.commentsInputWrap,
+                { backgroundColor: colors.headerBackground, borderTopColor: colors.border },
+              ]}
+            >
+              {editingCommentId ? (
+                <View
+                  style={[
+                    styles.commentsEditBar,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.commentsEditText, { color: colors.text }]}>Editing comment</Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setEditingCommentId(null);
+                      setCommentInput('');
+                    }}
+                  >
+                    <Ionicons name="close" size={18} color={colors.textMuted} />
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+
+              <View style={styles.commentsInputRow}>
+                <TextInput
+                  style={[
+                    styles.commentsInput,
+                    {
+                      backgroundColor: colors.inputBackground,
+                      color: colors.text,
+                    },
+                  ]}
+                  value={commentInput}
+                  onChangeText={setCommentInput}
+                  placeholder="Write a comment..."
+                  placeholderTextColor={colors.textMuted}
+                  multiline
+                  maxLength={4000}
+                />
+
+                <TouchableOpacity
+                  style={[
+                    styles.commentsSendButton,
+                    {
+                      backgroundColor: commentInput.trim() && !isCommentMutating
+                        ? colors.primary
+                        : colors.surfaceVariant,
+                    },
+                  ]}
+                  onPress={handleSendComment}
+                  disabled={!commentInput.trim() || isCommentMutating}
+                >
+                  {isCommentMutating ? (
+                    <ActivityIndicator size="small" color={colors.primaryForeground} />
+                  ) : (
+                    <Ionicons
+                      name={editingCommentId ? 'checkmark' : 'send'}
+                      size={18}
+                      color={commentInput.trim() ? colors.primaryForeground : colors.textMuted}
+                    />
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <View
+              style={[
+                styles.commentsDisabledWrap,
+                { backgroundColor: colors.headerBackground, borderTopColor: colors.border },
+              ]}
+            >
+              <Ionicons name="lock-closed-outline" size={16} color={colors.textMuted} />
+              <Text style={[styles.commentsDisabledText, { color: colors.textMuted }]}>
+                Comments are disabled in this channel.
+              </Text>
+            </View>
+          )}
+        </View>
+      </Modal>
+
       {/* Message Action Modal */}
-      <Modal visible={!!selectedMessage} transparent animationType="fade">
+      <Modal visible={!!selectedMessage} transparent animationType="none">
         <TouchableOpacity
           style={[styles.modalOverlay, { backgroundColor: colors.overlay }]}
           activeOpacity={1}
@@ -1658,7 +2422,7 @@ export function ChatWindowScreen({ navigation, route }: Props) {
       </Modal>
 
       {/* Image Preview Modal */}
-      <Modal visible={!!imagePreview} transparent animationType="fade">
+      <Modal visible={!!imagePreview} transparent animationType="none">
         <View style={[styles.imagePreviewOverlay, { backgroundColor: 'rgba(0,0,0,0.95)' }]}>
           <TouchableOpacity
             style={styles.imagePreviewClose}
@@ -1677,7 +2441,7 @@ export function ChatWindowScreen({ navigation, route }: Props) {
       </Modal>
 
       {/* Calls disabled modal (Expo Go compatible path) */}
-      <Modal visible={showCallsModal} transparent animationType="fade" onRequestClose={() => setShowCallsModal(false)}>
+      <Modal visible={showCallsModal} transparent animationType="none" onRequestClose={() => setShowCallsModal(false)}>
         <TouchableOpacity
           style={[styles.modalOverlay, { backgroundColor: colors.overlay }]}
           activeOpacity={1}
@@ -1713,7 +2477,7 @@ export function ChatWindowScreen({ navigation, route }: Props) {
       </Modal>
 
       {/* Header chat actions modal */}
-      <Modal visible={showHeaderMenu} transparent animationType="fade" onRequestClose={() => setShowHeaderMenu(false)}>
+      <Modal visible={showHeaderMenu} transparent animationType="none" onRequestClose={() => setShowHeaderMenu(false)}>
         <Pressable
           style={[styles.headerMenuOverlay, { backgroundColor: colors.overlay }]}
           onPress={() => setShowHeaderMenu(false)}
@@ -1758,7 +2522,7 @@ export function ChatWindowScreen({ navigation, route }: Props) {
       </Modal>
 
       {/* Attach menu modal */}
-      <Modal visible={showAttachMenu} transparent animationType="fade" onRequestClose={() => setShowAttachMenu(false)}>
+      <Modal visible={showAttachMenu} transparent animationType="none" onRequestClose={() => setShowAttachMenu(false)}>
         <Pressable
           style={[styles.headerMenuOverlay, { backgroundColor: colors.overlay }]}
           onPress={() => setShowAttachMenu(false)}
@@ -1792,7 +2556,7 @@ export function ChatWindowScreen({ navigation, route }: Props) {
       </Modal>
 
       {/* Image Picker Modal with Indexing */}
-      <Modal visible={showImagePicker} transparent animationType="fade">
+      <Modal visible={showImagePicker} transparent animationType="none">
         <Pressable
           style={[styles.imagePickerOverlay, { backgroundColor: colors.overlay }]}
           onPress={() => {
@@ -1874,7 +2638,7 @@ export function ChatWindowScreen({ navigation, route }: Props) {
       </Modal>
 
       {/* Fullscreen Video Player Modal */}
-      <Modal visible={!!fullscreenVideoUrl} animationType="fade" presentationStyle="fullScreen">
+      <Modal visible={!!fullscreenVideoUrl} animationType="none" presentationStyle="fullScreen">
         <View style={[styles.fullscreenVideoContainer, { backgroundColor: '#000' }]}>
           <TouchableOpacity
             style={styles.fullscreenVideoClose}
@@ -1914,7 +2678,7 @@ export function ChatWindowScreen({ navigation, route }: Props) {
         onRemoveCustomImage={handleRemoveCustomImage}
         colors={colors}
       />
-    </View>
+    </Animated.View>
     </GestureDetector>
   );
 }
@@ -1973,6 +2737,7 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   searchNavButton: { padding: 2 },
+  searchCloseButton: { padding: 2 },
   messagesList: { paddingHorizontal: 12, paddingVertical: 8 },
   dateSeparator: {
     flexDirection: 'row',
@@ -2222,6 +2987,21 @@ const styles = StyleSheet.create({
   },
   reactionEmoji: { fontSize: 14 },
   reactionCount: { fontSize: 12, marginLeft: 2 },
+  commentOpenButton: {
+    marginTop: 6,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  commentOpenText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
   pollContainer: { borderRadius: 12, padding: 12, marginBottom: 4 },
   pollQuestion: { fontSize: 15, fontWeight: '600', marginBottom: 8 },
   pollOption: {
@@ -2251,8 +3031,31 @@ const styles = StyleSheet.create({
 
   typingIndicator: { paddingHorizontal: 16, paddingVertical: 4 },
   typingText: { fontSize: 12, fontStyle: 'italic' },
-  pinnedBar: {
+  blockNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderTopWidth: 1,
+  },
+  blockNoticeText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  blockNoticeAction: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  blockNoticeActionText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  pinnedBar: {
+    borderBottomWidth: 1,
     paddingHorizontal: 12,
     paddingVertical: 8,
     flexDirection: 'row',
@@ -2305,6 +3108,13 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  uploadProgressCircle: {
+    borderWidth: 2,
+  },
+  uploadProgressText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
 
   modalOverlay: {
@@ -2404,6 +3214,151 @@ const styles = StyleSheet.create({
   imagePreviewOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   imagePreviewClose: { position: 'absolute', top: 50, right: 16, zIndex: 10 },
   imagePreviewImage: { width: '100%', height: '80%' },
+
+  commentsScreen: {
+    flex: 1,
+  },
+  commentsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    paddingBottom: 10,
+    paddingHorizontal: 8,
+  },
+  commentsHeaderTextWrap: {
+    flex: 1,
+    marginLeft: 2,
+  },
+  commentsTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  commentsSubtitle: {
+    fontSize: 12,
+    marginTop: 1,
+  },
+  commentsPostPreview: {
+    borderBottomWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  commentsPostLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+  },
+  commentsPostText: {
+    fontSize: 14,
+    lineHeight: 19,
+  },
+  commentsList: {
+    flex: 1,
+  },
+  commentsListContent: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 10,
+  },
+  commentsEmptyWrap: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  commentsEmptyText: {
+    fontSize: 14,
+  },
+  commentRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  commentRowMine: {
+    justifyContent: 'flex-end',
+  },
+  commentBubble: {
+    maxWidth: '86%',
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  commentSender: {
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 3,
+  },
+  commentText: {
+    fontSize: 14,
+    lineHeight: 19,
+  },
+  commentMeta: {
+    marginTop: 4,
+    alignItems: 'flex-end',
+  },
+  commentTime: {
+    fontSize: 11,
+  },
+  commentActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 2,
+  },
+  commentActionButton: {
+    padding: 4,
+  },
+  commentsInputWrap: {
+    borderTopWidth: 1,
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: Platform.OS === 'ios' ? 24 : 8,
+  },
+  commentsEditBar: {
+    borderWidth: 1,
+    borderRadius: 9,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  commentsEditText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  commentsInputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  commentsInput: {
+    flex: 1,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    fontSize: 14,
+    maxHeight: 96,
+  },
+  commentsSendButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  commentsDisabledWrap: {
+    borderTopWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  commentsDisabledText: {
+    fontSize: 13,
+  },
 
   stickerOverlay: { flex: 1, justifyContent: 'flex-end' },
   stickerSheet: {

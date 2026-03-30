@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest, clearSessionCookie } from '../api';
+import { unregisterDevicePushToken } from '../lib/notifications';
 import type { User } from '../types';
 
 export function useAuth() {
@@ -45,6 +46,7 @@ export function useAuth() {
 
   const logoutMutation = useMutation({
     mutationFn: async () => {
+      await unregisterDevicePushToken();
       await apiRequest('/api/logout', { method: 'POST' });
       await clearSessionCookie();
     },

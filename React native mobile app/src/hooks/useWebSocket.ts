@@ -6,6 +6,8 @@ import { getSessionCookie } from '../api';
 import { WS_EVENTS } from '../types';
 import { setTypingStart, setTypingStop, setWsSendForTyping } from './useTyping';
 import { setUserStatus, setOnlineUsers } from './useUserStatus';
+import { isChatMuted } from '../lib/chat-mute';
+import { showIncomingMessageNotification } from '../lib/notifications';
 import type { Message, Chat } from '../types';
 
 type WebSocketHookOptions = {
@@ -44,6 +46,55 @@ export function useWebSocket(options: WebSocketHookOptions) {
     activeChatIdRef.current = activeChatId;
   }, [activeChatId]);
 
+  const maybeShowIncomingNotification = useCallback(
+    async (message: Message) => {
+      if (!userId) return;
+      if (message.senderId === userId) return;
+      if (activeChatIdRef.current === message.chatId) return;
+
+      const muted = await isChatMuted(message.chatId, userId);
+      if (muted) return;
+
+      const chats = queryClient.getQueryData<Chat[]>(['/api/chats']) || [];
+      const chat = chats.find((item) => item.id === message.chatId);
+
+      const senderParts = [message.sender?.firstName, message.sender?.lastName]
+        .map((value) => (value || '').trim())
+        .filter(Boolean);
+      const senderName =
+        senderParts.join(' ') ||
+        message.sender?.username ||
+        message.sender?.email ||
+        'Someone';
+
+      const dmOtherUser = chat?.members.find((member) => member.userId !== userId)?.user;
+      const dmNameParts = [dmOtherUser?.firstName, dmOtherUser?.lastName]
+        .map((value) => (value || '').trim())
+        .filter(Boolean);
+      const resolvedDmName =
+        dmNameParts.join(' ') ||
+        dmOtherUser?.username ||
+        dmOtherUser?.email ||
+        senderName;
+
+      const rawChatName = (chat?.name || '').trim();
+      const chatName =
+        rawChatName ||
+        (chat?.isChannel ? 'Channel' : chat?.isGroup ? 'Group chat' : resolvedDmName);
+
+      await showIncomingMessageNotification({
+        chatId: message.chatId,
+        chatName,
+        senderName,
+        content: message.content,
+        attachmentCount: message.attachments?.length || 0,
+        isGroup: !!chat?.isGroup,
+        isChannel: !!chat?.isChannel,
+      });
+    },
+    [queryClient, userId],
+  );
+
   const connect = useCallback(() => {
     if (!userId) return;
     if (appStateRef.current !== 'active') return;
@@ -81,6 +132,7 @@ export function useWebSocket(options: WebSocketHookOptions) {
             // Update chat list
             queryClient.invalidateQueries({ queryKey: ['/api/chats'] });
             onMessageReceived?.(message);
+            void maybeShowIncomingNotification(message).catch(() => {});
             break;
           }
 
@@ -192,7 +244,7 @@ export function useWebSocket(options: WebSocketHookOptions) {
     ws.onerror = () => {
       ws.close();
     };
-  }, [userId, queryClient, onMessageReceived, onCallOffer, onCallAnswer, onCallIceCandidate, onCallHangup, onCallReject, onCallBusy]);
+  }, [userId, queryClient, onMessageReceived, onCallOffer, onCallAnswer, onCallIceCandidate, onCallHangup, onCallReject, onCallBusy, maybeShowIncomingNotification]);
 
   useEffect(() => {
     shouldReconnectRef.current = true;
