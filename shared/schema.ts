@@ -66,7 +66,25 @@ export const chatMembers = pgTable("chat_members", {
   permissions: jsonb("permissions").default(sql`'{}'::jsonb`), // custom permissions object
   joinedAt: timestamp("joined_at", { withTimezone: true }).defaultNow(),
   pinnedAt: timestamp("pinned_at", { withTimezone: true }),
+  notificationsMutedForever: boolean("notifications_muted_forever").default(false),
+  notificationsMutedUntil: timestamp("notifications_muted_until", { withTimezone: true }),
 });
+
+export const pushTokens = pgTable("push_tokens", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  token: varchar("token", { length: 255 }).notNull().unique(),
+  platform: varchar("platform", { length: 20 }),
+  deviceId: varchar("device_id", { length: 120 }),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+}, (table) => [
+  index("IDX_push_tokens_user").on(table.userId),
+  index("IDX_push_tokens_active").on(table.isActive),
+]);
+
+export type PushToken = typeof pushTokens.$inferSelect;
 
 export const messages = pgTable("messages", {
   id: serial("id").primaryKey(),
@@ -189,6 +207,7 @@ export type MessageComment = typeof messageComments.$inferSelect;
 export const usersRelations = relations(users, ({ many }) => ({
   memberships: many(chatMembers),
   messages: many(messages),
+  pushTokens: many(pushTokens),
   // blocksSent/blocksReceived simply reference the blocks table; Drizzle
   // can infer the foreign keys automatically from our column definitions.
   blocksSent: many(blocks),
@@ -206,6 +225,10 @@ export const chatsRelations = relations(chats, ({ many }) => ({
 export const chatMembersRelations = relations(chatMembers, ({ one }) => ({
   chat: one(chats, { fields: [chatMembers.chatId], references: [chats.id] }),
   user: one(users, { fields: [chatMembers.userId], references: [users.id] }),
+}));
+
+export const pushTokensRelations = relations(pushTokens, ({ one }) => ({
+  user: one(users, { fields: [pushTokens.userId], references: [users.id] }),
 }));
 
 export const messagesRelations = relations(messages, ({ one, many }) => ({

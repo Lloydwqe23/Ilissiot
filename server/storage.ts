@@ -5,6 +5,7 @@ import {
   messages,
   messageReactions,
     messageComments,
+  pushTokens,
   users,
   blocks,
   pinnedMessages,
@@ -54,9 +55,17 @@ interface IStorage {
   updateGroupChat(chatId: number, updates: { name?: string; avatarUrl?: string | null }): Promise<ChatWithMembers>;
   addGroupMembers(chatId: number, userIds: string[]): Promise<ChatWithMembers>;
   removeGroupMember(chatId: number, userId: string): Promise<void>;
+  setChatNotificationMute(chatId: number, userId: string, mute: { forever: boolean; until: Date | null }): Promise<void>;
   deleteChat(chatId: number): Promise<void>;
   leaveChatForUser(chatId: number, userId: string): Promise<void>;
   updateChatCreator(chatId: number, userId: string): Promise<void>;
+
+  // Push notification token operations
+  upsertPushToken(userId: string, token: string, options?: { platform?: string | null; deviceId?: string | null }): Promise<void>;
+  deactivatePushToken(userId: string, token: string): Promise<void>;
+  deactivateAllPushTokens(userId: string): Promise<void>;
+  getActivePushTokensForUsers(userIds: string[]): Promise<Array<{ userId: string; token: string; platform: string | null }>>;
+  deactivatePushTokens(tokens: string[]): Promise<void>;
   
   // Message operations
   getMessagesForChat(chatId: number, userId: string, limit?: number): Promise<MessageWithSender[]>;
@@ -134,6 +143,93 @@ export class DatabaseStorage implements IStorage {
     // join returns {users, blocks} objects; map to user and strip sensitive data
     return rows.map(r => sanitizeUser(r.users)) as User[];
   }
+
+  async setChatNotificationMute(chatId: number, userId: string, mute: { forever: boolean; until: Date | null }): Promise<void> {
+    await db
+      .update(chatMembers)
+      .set({
+        notificationsMutedForever: mute.forever,
+        notificationsMutedUntil: mute.forever ? null : mute.until,
+      })
+      .where(
+        and(
+          eq(chatMembers.chatId, chatId),
+          eq(chatMembers.userId, userId)
+        )
+      );
+  }
+
+  async upsertPushToken(userId: string, token: string, options?: { platform?: string | null; deviceId?: string | null }): Promise<void> {
+    const now = new Date();
+
+    await db
+      .insert(pushTokens)
+      .values({
+        userId,
+        token,
+        platform: options?.platform ?? null,
+        deviceId: options?.deviceId ?? null,
+        isActive: true,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: pushTokens.token,
+        set: {
+          userId,
+          platform: options?.platform ?? null,
+          deviceId: options?.deviceId ?? null,
+          isActive: true,
+          updatedAt: now,
+        },
+      });
+  }
+
+  async deactivatePushToken(userId: string, token: string): Promise<void> {
+    await db
+      .update(pushTokens)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(
+        and(
+          eq(pushTokens.userId, userId),
+          eq(pushTokens.token, token)
+        )
+      );
+  }
+
+  async deactivateAllPushTokens(userId: string): Promise<void> {
+    await db
+      .update(pushTokens)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(eq(pushTokens.userId, userId));
+  }
+
+  async getActivePushTokensForUsers(userIds: string[]): Promise<Array<{ userId: string; token: string; platform: string | null }>> {
+    if (userIds.length === 0) return [];
+
+    return db
+      .select({
+        userId: pushTokens.userId,
+        token: pushTokens.token,
+        platform: pushTokens.platform,
+      })
+      .from(pushTokens)
+      .where(
+        and(
+          inArray(pushTokens.userId, userIds),
+          eq(pushTokens.isActive, true)
+        )
+      );
+  }
+
+  async deactivatePushTokens(tokens: string[]): Promise<void> {
+    if (tokens.length === 0) return;
+
+    await db
+      .update(pushTokens)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(inArray(pushTokens.token, tokens));
+  }
+
   async searchUsers(query: string, currentUserId: string): Promise<User[]> {
     const normalizedQuery = query.trim().replace(/^@/, '').toLowerCase();
     if (!normalizedQuery) return [];

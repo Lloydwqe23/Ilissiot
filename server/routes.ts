@@ -15,6 +15,9 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
 
+  const EXPO_PUSH_API_URL = 'https://exp.host/--/api/v2/push/send';
+  const EXPO_PUSH_CHUNK_SIZE = 100;
+
   type LastSeenPrivacy = 'everyone' | 'nobody';
 
   const loadLastSeenPrivacy = async (userIds: string[]): Promise<Map<string, LastSeenPrivacy>> => {
@@ -114,6 +117,88 @@ export async function registerRoutes(
   
   // Map of userId -> WebSocket connection
   const clients = new Map<string, WebSocket>();
+
+  type ExpoPushMessage = {
+    to: string;
+    sound: 'default';
+    title: string;
+    body: string;
+    data: Record<string, unknown>;
+  };
+
+  const isExpoPushToken = (token: string): boolean =>
+    /^(ExponentPushToken|ExpoPushToken)\[[^\]]+\]$/.test(token);
+
+  const isMemberCurrentlyMuted = (member: any): boolean => {
+    if (member?.notificationsMutedForever) return true;
+    if (!member?.notificationsMutedUntil) return false;
+
+    const mutedUntil = new Date(member.notificationsMutedUntil);
+    if (Number.isNaN(mutedUntil.getTime())) return false;
+    return mutedUntil > new Date();
+  };
+
+  const buildPushTitle = (chat: any, sender: any): string => {
+    const senderName = sender?.firstName || sender?.username || 'New message';
+    if (chat?.isGroup || chat?.isChannel) {
+      const chatName = (chat?.name || '').trim() || 'Group';
+      return `${senderName} in ${chatName}`;
+    }
+    return senderName;
+  };
+
+  const buildPushBody = (message: any): string => {
+    const content = (message?.content || '').trim();
+    if (content.length > 0) {
+      return content.length > 180 ? `${content.slice(0, 177)}...` : content;
+    }
+
+    const attachmentCount = Array.isArray(message?.attachments) ? message.attachments.length : 0;
+    if (attachmentCount <= 0) return 'Sent a message';
+    if (attachmentCount === 1) return 'Sent an attachment';
+    return `Sent ${attachmentCount} attachments`;
+  };
+
+  const sendExpoPushMessages = async (messagesToSend: ExpoPushMessage[]): Promise<string[]> => {
+    const staleTokens: string[] = [];
+
+    for (let index = 0; index < messagesToSend.length; index += EXPO_PUSH_CHUNK_SIZE) {
+      const chunk = messagesToSend.slice(index, index + EXPO_PUSH_CHUNK_SIZE);
+      if (chunk.length === 0) continue;
+
+      try {
+        const response = await fetch(EXPO_PUSH_API_URL, {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Accept-Encoding': 'gzip, deflate',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(chunk),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('Expo push request failed:', response.status, errorText);
+          continue;
+        }
+
+        const responseJson = await response.json() as any;
+        const tickets: any[] = Array.isArray(responseJson?.data) ? responseJson.data : [];
+
+        tickets.forEach((ticket, ticketIndex) => {
+          if (ticket?.status === 'error' && ticket?.details?.error === 'DeviceNotRegistered') {
+            const staleToken = chunk[ticketIndex]?.to;
+            if (staleToken) staleTokens.push(staleToken);
+          }
+        });
+      } catch (err) {
+        console.error('Expo push send error:', err);
+      }
+    }
+
+    return staleTokens;
+  };
 
   wss.on('connection', (ws, req) => {
     // A01: userId is now authenticated from the session, NOT from the client payload
@@ -235,6 +320,46 @@ export async function registerRoutes(
     });
   }
 
+  async function sendPushNotificationsForMessage(chat: any, message: any, senderId: string): Promise<void> {
+    const candidates = (chat?.members || []).filter((member: any) => {
+      if (!member?.userId || member.userId === senderId) return false;
+      if (clients.has(member.userId)) return false;
+      return !isMemberCurrentlyMuted(member);
+    });
+
+    if (candidates.length === 0) return;
+
+    const recipientIds: string[] = [];
+    for (const member of candidates) {
+      const recipientId = member?.userId;
+      if (typeof recipientId !== 'string' || recipientId.length === 0) continue;
+      if (!recipientIds.includes(recipientId)) {
+        recipientIds.push(recipientId);
+      }
+    }
+    const tokenRows = await storage.getActivePushTokensForUsers(recipientIds);
+    const validTokenRows = tokenRows.filter((row) => isExpoPushToken(row.token));
+    if (validTokenRows.length === 0) return;
+
+    const payloads: ExpoPushMessage[] = validTokenRows.map((row) => ({
+      to: row.token,
+      sound: 'default',
+      title: buildPushTitle(chat, message?.sender),
+      body: buildPushBody(message),
+      data: {
+        type: 'message.new',
+        chatId: chat.id,
+        messageId: message.id,
+        senderId,
+      },
+    }));
+
+    const staleTokens = await sendExpoPushMessages(payloads);
+    if (staleTokens.length > 0) {
+      await storage.deactivatePushTokens(staleTokens);
+    }
+  }
+
   // API Routes
 
   // User Profile Updates
@@ -255,6 +380,55 @@ export async function registerRoutes(
         return res.status(400).json({ message: err.message });
       }
       res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post('/api/notifications/push-token', isAuthenticated, async (req: any, res) => {
+    try {
+      const input = z.object({
+        token: z.string().min(1).max(255),
+        platform: z.enum(['ios', 'android', 'web']).optional().nullable(),
+        deviceId: z.string().min(1).max(120).optional().nullable(),
+      }).parse(req.body);
+
+      if (!isExpoPushToken(input.token)) {
+        return res.status(400).json({ message: 'Invalid Expo push token format' });
+      }
+
+      const userId = req.user.claims.sub;
+      await storage.upsertPushToken(userId, input.token, {
+        platform: input.platform ?? null,
+        deviceId: input.deviceId ?? null,
+      });
+
+      res.json({ success: true });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      console.error('Register push token error:', err);
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  });
+
+  app.delete('/api/notifications/push-token', isAuthenticated, async (req: any, res) => {
+    try {
+      const input = z.object({ token: z.string().min(1).max(255).optional() }).parse(req.body || {});
+      const userId = req.user.claims.sub;
+
+      if (input.token) {
+        await storage.deactivatePushToken(userId, input.token);
+      } else {
+        await storage.deactivateAllPushTokens(userId);
+      }
+
+      res.json({ success: true });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      console.error('Deactivate push token error:', err);
+      res.status(500).json({ message: 'Internal server error' });
     }
   });
 
@@ -390,6 +564,52 @@ export async function registerRoutes(
       res.json(chatWithPrivacy);
     } catch (err) {
       res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.patch('/api/chats/:chatId/notification-mute', isAuthenticated, async (req: any, res) => {
+    try {
+      const chatId = Number(req.params.chatId);
+      if (!Number.isFinite(chatId)) {
+        return res.status(400).json({ message: 'Invalid chat id' });
+      }
+
+      const input = z.object({ muteValue: z.string().nullable() }).parse(req.body);
+      const normalizedMuteValue = input.muteValue?.trim() || null;
+      const userId = req.user.claims.sub;
+
+      const chat = await storage.getChat(chatId);
+      if (!chat) return res.status(404).json({ message: 'Chat not found' });
+      if (!chat.members.some((m) => m.userId === userId)) {
+        return res.status(403).json({ message: 'Forbidden' });
+      }
+
+      let forever = false;
+      let until: Date | null = null;
+
+      if (normalizedMuteValue) {
+        if (normalizedMuteValue === 'forever') {
+          forever = true;
+        } else {
+          const parsed = new Date(normalizedMuteValue);
+          if (Number.isNaN(parsed.getTime())) {
+            return res.status(400).json({ message: 'muteValue must be a valid ISO date, "forever", or null' });
+          }
+          if (parsed <= new Date()) {
+            return res.status(400).json({ message: 'muteValue date must be in the future' });
+          }
+          until = parsed;
+        }
+      }
+
+      await storage.setChatNotificationMute(chatId, userId, { forever, until });
+      res.json({ success: true, muteValue: normalizedMuteValue });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      console.error('Set chat mute error:', err);
+      res.status(500).json({ message: 'Internal server error' });
     }
   });
 
@@ -875,6 +1095,8 @@ export async function registerRoutes(
           });
         }
       });
+
+      void sendPushNotificationsForMessage(chat, message, userId);
 
       res.status(201).json(message);
     } catch (err) {
