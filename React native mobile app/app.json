@@ -1,0 +1,62 @@
+{
+  "expo": {
+    "name": "Ilissiot",
+    "jsEngine": "hermes",
+    "slug": "ilissiot-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#6366f1"
+    },
+    "androidStatusBar": {
+      "backgroundColor": "#0f172a",
+      "barStyle": "light-content",
+      "translucent": false
+    },
+    "androidNavigationBar": {
+      "backgroundColor": "#0f172a",
+      "barStyle": "light-content"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ilissiot.mobile",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Ilissiot needs camera access for video calls and sending photos",
+        "NSMicrophoneUsageDescription": "Ilissiot needs microphone access for audio and video calls",
+        "NSPhotoLibraryUsageDescription": "Ilissiot needs photo library access to send images"
+      }
+    },
+    "android": {
+      "jsEngine": "hermes",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#6366f1"
+      },
+      "package": "com.ilissiot.mobile",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "plugins": [
+      "expo-image-picker",
+      "expo-document-picker",
+      "@react-native-community/datetimepicker",
+      "expo-font"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "50a05c81-f473-40b6-96c9-1ee9170f5e34"
+      }
+    }
+  }
+}
